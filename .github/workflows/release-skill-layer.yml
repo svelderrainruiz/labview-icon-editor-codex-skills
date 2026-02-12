@@ -1,0 +1,84 @@
+name: release-skill-layer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      asset_name: ${{ steps.package.outputs.asset_name }}
+      asset_path: ${{ steps.package.outputs.asset_path }}
+      asset_sha256: ${{ steps.package.outputs.asset_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: package
+        name: Build layer zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetName = 'lvie-codex-skill-layer.zip'
+          $staging = Join-Path $env:RUNNER_TEMP 'skill-layer'
+          if (Test-Path $staging) { Remove-Item -Path $staging -Recurse -Force }
+          New-Item -Path $staging -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/ci-debt" -Destination "$staging/ci-debt" -Recurse -Force
+
+          $manifestPath = Join-Path $staging 'manifest.json'
+          $manifest = Get-Content -Raw -Path "$env:GITHUB_WORKSPACE/manifest.json" | ConvertFrom-Json
+          $manifest.generated_utc = (Get-Date).ToUniversalTime().ToString('o')
+          $manifest | ConvertTo-Json -Depth 10 | Out-File -FilePath $manifestPath -Encoding utf8
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/LICENSE" -Destination (Join-Path $staging 'LICENSE') -Force
+
+          $zipPath = Join-Path $env:RUNNER_TEMP $assetName
+          if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -Force
+
+          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-skill-layer
+          path: ${{ steps.package.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Publish release asset (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $zipPath = '${{ steps.package.outputs.asset_path }}'
+          if (-not (Test-Path -Path $zipPath)) {
+            throw "Packaged asset not found: $zipPath"
+          }
+
+          $notes = @(
+            'Layered Codex skill asset for labview-icon-editor.',
+            '',
+            '- Asset: lvie-codex-skill-layer.zip',
+            '- SHA256: ${{ steps.package.outputs.asset_sha256 }}',
+            '- License: 0BSD'
+          ) -join [Environment]::NewLine
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zipPath --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $tag $zipPath --repo $env:GITHUB_REPOSITORY --title $tag --notes $notes
+          }
