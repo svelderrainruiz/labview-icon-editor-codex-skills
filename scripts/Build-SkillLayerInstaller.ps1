@@ -14,7 +14,10 @@ param(
     [string]$NsisScriptPath,
 
     [Parameter(Mandatory = $false)]
-    [string]$MakensisPath
+    [string]$MakensisPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$NsisRoot = 'C:\Program Files (x86)\NSIS'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,7 +25,10 @@ $ErrorActionPreference = 'Stop'
 function Resolve-MakensisPath {
     param(
         [Parameter(Mandatory = $false)]
-        [string]$Override
+        [string]$Override,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Root
     )
 
     if (-not [string]::IsNullOrWhiteSpace($Override)) {
@@ -32,21 +38,18 @@ function Resolve-MakensisPath {
         return (Resolve-Path -LiteralPath $Override).Path
     }
 
-    $cmd = Get-Command makensis -ErrorAction SilentlyContinue
-    if ($cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
-        return $cmd.Source
+    $resolvedRoot = if (-not [string]::IsNullOrWhiteSpace($Root)) {
+        [System.IO.Path]::GetFullPath($Root)
+    } else {
+        'C:\Program Files (x86)\NSIS'
     }
 
-    foreach ($candidate in @(
-        'C:\Program Files (x86)\NSIS\makensis.exe',
-        'C:\Program Files\NSIS\makensis.exe'
-    )) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            return $candidate
-        }
+    $candidate = Join-Path $resolvedRoot 'makensis.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return $candidate
     }
 
-    throw 'makensis was not found. Install NSIS or pass -MakensisPath.'
+    throw ("Required NSIS binary not found at '{0}'. Install NSIS to '{1}' or pass -MakensisPath <full-path>." -f $candidate, $resolvedRoot)
 }
 
 $resolvedPayloadRoot = (Resolve-Path -LiteralPath $PayloadRoot).Path
@@ -70,7 +73,8 @@ if (-not (Test-Path -LiteralPath $resolvedScriptPath -PathType Leaf)) {
     throw "NSIS script not found: $resolvedScriptPath"
 }
 
-$makensis = Resolve-MakensisPath -Override $MakensisPath
+$makensis = Resolve-MakensisPath -Override $MakensisPath -Root $NsisRoot
+Write-Host ("Using makensis at {0}" -f $makensis)
 
 $args = @(
     '/V3',

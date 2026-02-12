@@ -18,5 +18,8 @@ The release asset is pinned by the consumer lock file and validated by:
 - manifest `license_spdx` (`0BSD`)
 
 Installer contract:
+- Canonical NSIS root: `C:\Program Files (x86)\NSIS`
+- Required binary: `C:\Program Files (x86)\NSIS\makensis.exe`
+- Optional override: repository variable `NSIS_ROOT` or script argument `-MakensisPath`
 - NSIS headless install supports `/S`.
 - Consumer lock defines installer args and install-root template.

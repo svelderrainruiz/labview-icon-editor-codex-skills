@@ -51,7 +51,22 @@ jobs:
           if (-not (Test-Path -Path $buildScript -PathType Leaf)) {
             throw "Installer build script not found: $buildScript"
           }
-          & $buildScript -PayloadRoot $staging -OutputPath $assetPath -InstallRoot $installRoot
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) {
+            $nsisRoot = 'C:\Program Files (x86)\NSIS'
+          }
+          $makensis = Join-Path $nsisRoot 'makensis.exe'
+          if (-not (Test-Path -Path $makensis -PathType Leaf)) {
+            throw "Required NSIS binary not found at '$makensis'. Set repository variable NSIS_ROOT or install NSIS at C:\Program Files (x86)\NSIS."
+          }
+
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version probe failed with exit code $LASTEXITCODE"
+          }
+
+          & $buildScript -PayloadRoot $staging -OutputPath $assetPath -InstallRoot $installRoot -NsisRoot $nsisRoot
           if ($LASTEXITCODE -ne 0) {
             throw "Build-SkillLayerInstaller.ps1 failed with exit code $LASTEXITCODE"
           }
