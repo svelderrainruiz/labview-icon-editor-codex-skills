@@ -3,7 +3,7 @@
 Layered Codex skill assets for `labview-icon-editor` CI/runtime integrations.
 
 - SPDX-License-Identifier: `0BSD`
-- Primary packaged layer: `lvie-codex-skill-layer.zip`
+- Primary packaged layer: `lvie-codex-skill-layer-installer.exe`
 - Current layer modules:
   - `ci-debt/*`
   - `lunit-contract/*`
@@ -16,3 +16,7 @@ The release asset is pinned by the consumer lock file and validated by:
 - SHA256 digest
 - required files list
 - manifest `license_spdx` (`0BSD`)
+
+Installer contract:
+- NSIS headless install supports `/S`.
+- Consumer lock defines installer args and install-root template.

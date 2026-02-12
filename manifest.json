@@ -1,9 +1,16 @@
 {
   "name": "lvie-codex-skill-layer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license_spdx": "0BSD",
   "license_file": "LICENSE",
   "generated_utc": null,
+  "distribution": {
+    "type": "nsis-installer",
+    "asset_name": "lvie-codex-skill-layer-installer.exe",
+    "silent_args": [
+      "/S"
+    ]
+  },
   "required_files": [
     "ci-debt/Invoke-CiDebtAnalysis.ps1",
     "ci-debt/Test-CiDebtPolicyGate.ps1",

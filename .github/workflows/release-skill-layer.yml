@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
       asset_path: ${{ steps.package.outputs.asset_path }}
@@ -21,11 +21,11 @@ jobs:
         uses: actions/checkout@v4
 
       - id: package
-        name: Build layer zip
+        name: Build layer installer
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $assetName = 'lvie-codex-skill-layer.zip'
+          $assetName = 'lvie-codex-skill-layer-installer.exe'
           $staging = Join-Path $env:RUNNER_TEMP 'skill-layer'
           if (Test-Path $staging) { Remove-Item -Path $staging -Recurse -Force }
           New-Item -Path $staging -ItemType Directory -Force | Out-Null
@@ -43,13 +43,22 @@ jobs:
 
           Copy-Item -Path "$env:GITHUB_WORKSPACE/LICENSE" -Destination (Join-Path $staging 'LICENSE') -Force
 
-          $zipPath = Join-Path $env:RUNNER_TEMP $assetName
-          if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
-          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -Force
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+          if (Test-Path $assetPath) { Remove-Item -Path $assetPath -Force }
 
-          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $installRoot = 'C:\Users\Public\lvie\codex-skill-layer\current'
+          $buildScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-SkillLayerInstaller.ps1'
+          if (-not (Test-Path -Path $buildScript -PathType Leaf)) {
+            throw "Installer build script not found: $buildScript"
+          }
+          & $buildScript -PayloadRoot $staging -OutputPath $assetPath -InstallRoot $installRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build-SkillLayerInstaller.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $hash = (Get-FileHash -Path $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "asset_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload workflow artifact
@@ -75,7 +84,7 @@ jobs:
           $notes = @(
             'Layered Codex skill asset for labview-icon-editor.',
             '',
-            '- Asset: lvie-codex-skill-layer.zip',
+            '- Asset: lvie-codex-skill-layer-installer.exe',
             '- SHA256: ${{ steps.package.outputs.asset_sha256 }}',
             '- License: 0BSD'
           ) -join [Environment]::NewLine
