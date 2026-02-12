@@ -1,0 +1,15 @@
+{
+  "contract_version": "1.0.0",
+  "preflight_command": "pwsh -NoProfile -File .\\Tooling\\Assert-LabVIEWVersion.ps1 -RepoRoot <repo> -ProjectPath <project> -EnforceProjectLvVersion",
+  "lvversion_to_lvproj_mapping": {
+    "numeric_major": "first two digits",
+    "minor_revision": "next two digits",
+    "example": {
+      "lvversion": "21.0",
+      "lvproj_lvversion": "21008000"
+    }
+  },
+  "path_contract": {
+    "rule": "Split-Path -Parent PROJECT_PATH == REPO_ROOT"
+  }
+}

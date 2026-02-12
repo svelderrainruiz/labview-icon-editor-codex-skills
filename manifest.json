@@ -1,6 +1,6 @@
 {
   "name": "lvie-codex-skill-layer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license_spdx": "0BSD",
   "license_file": "LICENSE",
   "generated_utc": null,
@@ -10,6 +10,41 @@
     "ci-debt/signatures.json",
     "ci-debt/playbook.md",
     "ci-debt/fixtures/run-21840801109.json",
+    "lunit-contract/README.md",
+    "lunit-contract/contract.json",
+    "lunit-contract/fixtures/report-pass.xml",
+    "lunit-contract/fixtures/report-fail.xml",
+    "lunit-contract/fixtures/report-malformed.xml",
+    "proactive-loop/README.md",
+    "proactive-loop/sequence-mode-matrix.json",
+    "proactive-loop/sequence-diagnostics.schema.json",
+    "headless-parity/README.md",
+    "headless-parity/lvversion-lvproj-contract.json",
+    "belt-suspenders/README.md",
+    "belt-suspenders/runbook.md",
+    "manifest.json",
     "LICENSE"
-  ]
+  ],
+  "modules": {
+    "ci-debt": {
+      "description": "CI debt signature analysis and policy gate",
+      "path": "ci-debt"
+    },
+    "lunit-contract": {
+      "description": "Direct g-cli lunit + parser contract",
+      "path": "lunit-contract"
+    },
+    "proactive-loop": {
+      "description": "Single-bitness recovery sequence heuristics and diagnostics schema",
+      "path": "proactive-loop"
+    },
+    "headless-parity": {
+      "description": "Headless preflight LVVersion/path contract",
+      "path": "headless-parity"
+    },
+    "belt-suspenders": {
+      "description": "Local+remote orchestration playbooks",
+      "path": "belt-suspenders"
+    }
+  }
 }

@@ -31,6 +31,10 @@ jobs:
           New-Item -Path $staging -ItemType Directory -Force | Out-Null
 
           Copy-Item -Path "$env:GITHUB_WORKSPACE/ci-debt" -Destination "$staging/ci-debt" -Recurse -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/lunit-contract" -Destination "$staging/lunit-contract" -Recurse -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/proactive-loop" -Destination "$staging/proactive-loop" -Recurse -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/headless-parity" -Destination "$staging/headless-parity" -Recurse -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/belt-suspenders" -Destination "$staging/belt-suspenders" -Recurse -Force
 
           $manifestPath = Join-Path $staging 'manifest.json'
           $manifest = Get-Content -Raw -Path "$env:GITHUB_WORKSPACE/manifest.json" | ConvertFrom-Json
