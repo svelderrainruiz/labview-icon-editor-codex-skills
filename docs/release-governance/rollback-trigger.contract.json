@@ -1,0 +1,32 @@
+{
+  "name": "phase-3-rollback-trigger",
+  "version": "1.0",
+  "description": "Rollback contract for skill-layer release promotion failures.",
+  "triggers": [
+    {
+      "id": "parity-gate-failure",
+      "condition": "skills parity gate workflow fails after dispatch",
+      "severity": "high",
+      "action": "block promotion and rollback to previous known-good release"
+    },
+    {
+      "id": "missing-provenance",
+      "condition": "required provenance bundle fields are missing",
+      "severity": "high",
+      "action": "block stable promotion and rollback if already promoted"
+    },
+    {
+      "id": "artifact-integrity-failure",
+      "condition": "asset hash mismatch or missing release asset",
+      "severity": "critical",
+      "action": "immediate rollback and revoke candidate"
+    }
+  ],
+  "required_rollback_evidence": [
+    "rollback reason",
+    "impacted release tag",
+    "replacement release tag",
+    "operator",
+    "timestamp_utc"
+  ]
+}
