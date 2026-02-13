@@ -146,12 +146,17 @@ jobs:
             '- License: 0BSD',
             '',
             'Release provenance:',
+            "- skills_parity_gate_repo: ${{ needs.parity-gate.outputs.gate_repo }}",
+            "- skills_parity_gate_run_url: ${{ needs.parity-gate.outputs.gate_run_url }}",
+            "- skills_parity_gate_run_id: ${{ needs.parity-gate.outputs.gate_run_id }}",
+            "- skills_parity_gate_run_attempt: ${{ needs.parity-gate.outputs.gate_run_attempt }}",
+            "- skills_parity_enforcement_profile: ${{ needs.parity-gate.outputs.parity_enforcement_profile }}",
             "- consumer_repo: ${{ inputs.consumer_repo }}",
             "- consumer_ref: ${{ inputs.consumer_ref }}",
             "- consumer_sha: ${{ inputs.consumer_sha }}",
-            "- parity_run_url: ${{ needs.parity-gate.outputs.parity_run_url }}",
-            "- parity_run_id: ${{ needs.parity-gate.outputs.parity_run_id }}",
-            "- parity_head_sha: ${{ needs.parity-gate.outputs.parity_head_sha }}",
+            "- consumer_parity_run_url: ${{ needs.parity-gate.outputs.parity_run_url }}",
+            "- consumer_parity_run_id: ${{ needs.parity-gate.outputs.parity_run_id }}",
+            "- consumer_parity_head_sha: ${{ needs.parity-gate.outputs.parity_head_sha }}",
             "- nsis_root: ${{ steps.package.outputs.nsis_root }}"
           ) -join [Environment]::NewLine
 

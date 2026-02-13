@@ -46,6 +46,18 @@ on:
         default: true
         type: boolean
     outputs:
+      gate_repo:
+        description: Repository that produced this parity gate evidence.
+        value: ${{ jobs.parity-gate.outputs.gate_repo }}
+      gate_run_id:
+        description: Skills parity gate run identifier.
+        value: ${{ jobs.parity-gate.outputs.gate_run_id }}
+      gate_run_url:
+        description: Skills parity gate run URL.
+        value: ${{ jobs.parity-gate.outputs.gate_run_url }}
+      gate_run_attempt:
+        description: Skills parity gate run attempt.
+        value: ${{ jobs.parity-gate.outputs.gate_run_attempt }}
       parity_run_id:
         description: Dispatched consumer parity run identifier.
         value: ${{ jobs.parity-gate.outputs.parity_run_id }}
@@ -55,6 +67,9 @@ on:
       parity_head_sha:
         description: Head SHA reported by the consumer parity run.
         value: ${{ jobs.parity-gate.outputs.parity_head_sha }}
+      parity_enforcement_profile:
+        description: Effective parity policy profile used by the gate.
+        value: ${{ jobs.parity-gate.outputs.parity_enforcement_profile }}
       parity_gate_passed:
         description: True when parity gate validations passed.
         value: ${{ jobs.parity-gate.outputs.parity_gate_passed }}
@@ -66,11 +81,26 @@ jobs:
   parity-gate:
     runs-on: ubuntu-latest
     outputs:
+      gate_repo: ${{ steps.gate-meta.outputs.gate_repo }}
+      gate_run_id: ${{ steps.gate-meta.outputs.gate_run_id }}
+      gate_run_url: ${{ steps.gate-meta.outputs.gate_run_url }}
+      gate_run_attempt: ${{ steps.gate-meta.outputs.gate_run_attempt }}
       parity_run_id: ${{ steps.resolve.outputs.parity_run_id }}
       parity_run_url: ${{ steps.verify.outputs.parity_run_url }}
       parity_head_sha: ${{ steps.verify.outputs.parity_head_sha }}
+      parity_enforcement_profile: ${{ steps.verify.outputs.parity_enforcement_profile }}
       parity_gate_passed: ${{ steps.verify.outputs.parity_gate_passed }}
     steps:
+      - id: gate-meta
+        name: Capture gate run metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "gate_repo=$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "gate_run_id=$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "gate_run_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "gate_run_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
       - name: Validate parity gate token
         env:
           LVIE_PARITY_GATE_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
@@ -96,12 +126,17 @@ jobs:
         run: |
           set -euo pipefail
           started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          dispatch_run_self_hosted="$RUN_SELF_HOSTED"
+          if [[ "$CONSUMER_REPO" != "svelderrainruiz/labview-icon-editor" ]]; then
+            dispatch_run_self_hosted="false"
+          fi
+
           echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
           gh workflow run "LabVIEW Parity" \
             --repo "$CONSUMER_REPO" \
             --ref "$CONSUMER_REF" \
             -f run_build_spec="$RUN_BUILD_SPEC" \
-            -f run_self_hosted="$RUN_SELF_HOSTED" \
+            -f run_self_hosted="$dispatch_run_self_hosted" \
             -f expected_sha="$CONSUMER_SHA"
 
       - id: resolve
@@ -178,11 +213,20 @@ jobs:
             exit 1
           fi
 
-          required_jobs=(
-            "Parity (Linux Container)"
-            "Parity (Self-Hosted Runner)"
-            "Parity (Windows Container)"
-          )
+          if [[ "$CONSUMER_REPO" == "svelderrainruiz/labview-icon-editor" ]]; then
+            parity_enforcement_profile="upstream-strict"
+            required_jobs=(
+              "Parity (Linux Container)"
+              "Parity (Self-Hosted Runner)"
+              "Parity (Windows Container)"
+            )
+          else
+            parity_enforcement_profile="fork-container-only"
+            required_jobs=(
+              "Parity (Linux Container)"
+              "Parity (Windows Container)"
+            )
+          fi
 
           for job_name in "${required_jobs[@]}"; do
             job_conclusion="$(echo "$run_json" | jq -r --arg n "$job_name" '[.jobs[] | select(.name == $n) | .conclusion][0] // empty')"
@@ -198,5 +242,5 @@ jobs:
 
           echo "parity_run_url=$run_url" >> "$GITHUB_OUTPUT"
           echo "parity_head_sha=$run_head_sha" >> "$GITHUB_OUTPUT"
+          echo "parity_enforcement_profile=$parity_enforcement_profile" >> "$GITHUB_OUTPUT"
           echo "parity_gate_passed=true" >> "$GITHUB_OUTPUT"
-

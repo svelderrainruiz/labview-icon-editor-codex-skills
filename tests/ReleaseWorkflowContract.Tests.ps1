@@ -33,6 +33,16 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'consumer_sha:'
     }
 
+    It 'records skills parity gate evidence as primary release provenance' {
+        $script:releaseContent | Should -Match 'skills_parity_gate_run_url:'
+        $script:releaseContent | Should -Match 'skills_parity_gate_run_id:'
+        $script:releaseContent | Should -Match 'skills_parity_gate_run_attempt:'
+        $script:releaseContent | Should -Match 'skills_parity_enforcement_profile:'
+        $script:releaseContent | Should -Match 'consumer_parity_run_url:'
+        $script:releaseContent | Should -Match 'consumer_parity_run_id:'
+        $script:releaseContent | Should -Match 'consumer_parity_head_sha:'
+    }
+
     It 'packages vipm-cli-machine module in installer staging' {
         $script:releaseContent | Should -Match 'Copy-Item -Path "\$env:GITHUB_WORKSPACE/vipm-cli-machine" -Destination "\$staging/vipm-cli-machine" -Recurse -Force'
     }
@@ -42,5 +52,19 @@ Describe 'Release workflow contract' {
         $script:parityContent | Should -Match 'Parity \(Self-Hosted Runner\)'
         $script:parityContent | Should -Match 'Parity \(Windows Container\)'
     }
-}
 
+    It 'parity gate workflow emits skills-run metadata outputs' {
+        $script:parityContent | Should -Match 'gate_repo:'
+        $script:parityContent | Should -Match 'gate_run_id:'
+        $script:parityContent | Should -Match 'gate_run_url:'
+        $script:parityContent | Should -Match 'gate_run_attempt:'
+        $script:parityContent | Should -Match 'parity_enforcement_profile:'
+    }
+
+    It 'parity gate workflow applies upstream strict and fork container-only profiles' {
+        $script:parityContent | Should -Match 'if \[\[ "\$CONSUMER_REPO" == "svelderrainruiz/labview-icon-editor" \]\]'
+        $script:parityContent | Should -Match 'parity_enforcement_profile="upstream-strict"'
+        $script:parityContent | Should -Match 'parity_enforcement_profile="fork-container-only"'
+        $script:parityContent | Should -Match 'dispatch_run_self_hosted="false"'
+    }
+}
