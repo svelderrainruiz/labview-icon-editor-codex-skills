@@ -1,7 +1,7 @@
 # CI Catalog (Agent-Oriented)
 
 Last validated: 2026-02-13
-Validation evidence: run 22005219153 job inventory
+Validation evidence: runs 22002791381, 22004004032, 22005219153
 
 ## Purpose
 Provide a quick map of high-value CI jobs in labview-icon-editor so agents can triage quickly.
@@ -35,6 +35,11 @@ Provide a quick map of high-value CI jobs in labview-icon-editor so agents can t
 
 When either fails, treat run as NO-GO for release dispatch.
 
+## Recent failure evidence
+- Run 22002791381: Build VI Package + Pipeline Contract failed.
+- Run 22004004032: Build VI Package + Pipeline Contract failed.
+- Run 22005219153: currently in_progress; failures not observed yet.
+
 ## Artifact-to-job mental map
 - lv_icon_x64.lvlibp: expected from Linux container packed library lane.
 - lv_icon_x86.lvlibp: expected from Windows container packed library lane.
@@ -50,3 +55,4 @@ When either fails, treat run as NO-GO for release dispatch.
 
 ## Notes
 This catalog should be refreshed when the consumer workflow job list changes.
+Current branch under active monitoring: reconcile/issue-91-forward-port-456.

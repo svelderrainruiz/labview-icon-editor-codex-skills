@@ -1,7 +1,7 @@
 # Agent Quickstart (labview-icon-editor)
 
 Last validated: 2026-02-13
-Validation evidence: consumer run 22005219153
+Validation evidence: consumer runs 22002791381, 22004004032, 22005219153
 
 ## Purpose
 Get an agent productive in under 10 minutes for CI triage, release GO/NO-GO, and parity-aware troubleshooting.
@@ -47,6 +47,13 @@ A candidate run is GO-eligible only if all are true:
 
 If any condition fails: NO-GO (no release dispatch).
 
+## 3.1) Recent run outcomes (ground truth)
+| Run ID | Status | Conclusion | Failed jobs | Missing required artifacts | Gate verdict |
+| --- | --- | --- | --- | --- | --- |
+| 22002791381 | completed | failure | 2 | 0 | NO-GO |
+| 22004004032 | completed | failure | 2 | 0 | NO-GO |
+| 22005219153 | in_progress | pending | 0 | 2 | NO-GO (until completion + artifacts) |
+
 ## 4) Known high-signal failing jobs
 When these fail, treat as release blockers:
 - Build VI Package
@@ -80,3 +87,9 @@ Use skills repo workflow inputs in .github/workflows/release-skill-layer.yml:
 - If run is still in_progress/queued: keep monitoring and do not dispatch.
 - If run is completed failure: capture failed jobs + links, mark NO-GO, wait for next candidate.
 - If run is completed success and gates pass: dispatch release-skill-layer.
+
+## 8) Canonical references
+- Release plan history in skills repo:
+  - release-plan-22002791381.md
+  - release-plan-22004004032.md
+  - release-plan-22005219153.md

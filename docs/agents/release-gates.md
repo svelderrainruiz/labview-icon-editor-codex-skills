@@ -1,7 +1,7 @@
 # Release Gates Contract (Agent View)
 
 Last validated: 2026-02-13
-Validation evidence: consumer runs 22004004032 (NO-GO) and 22005219153 (active)
+Validation evidence: consumer runs 22002791381, 22004004032, 22005219153
 
 ## Contract intent
 Define deterministic GO/NO-GO release decisions for labview-icon-editor consumer runs before dispatching skill-layer release.
@@ -36,6 +36,13 @@ Any job with one of these conclusions fails the gate:
 4. Verify all required artifacts are present.
 5. If all pass: GO; else: NO-GO.
 
+## Evidence backfill (last 3 runs)
+| Run ID | Branch | Status | Conclusion | Failed jobs | Missing required artifacts | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| 22002791381 | reconcile/issue-91-forward-port-456 | completed | failure | Build VI Package; Pipeline Contract | none | NO-GO |
+| 22004004032 | reconcile/issue-91-forward-port-456 | completed | failure | Build VI Package; Pipeline Contract | none | NO-GO |
+| 22005219153 | reconcile/issue-91-forward-port-456 | in_progress | pending | none so far | lv_icon_x64.lvlibp; lv_icon_x86.lvlibp | NO-GO (not complete) |
+
 ## Dispatch policy
 Only dispatch .github/workflows/release-skill-layer.yml when GO.
 
@@ -69,5 +76,7 @@ gh api repos/svelderrainruiz/labview-icon-editor/actions/runs/<RUN_ID>/artifacts
 ```
 
 ## Decision examples
-- NO-GO example: run 22004004032 (completed failure, Build VI Package + Pipeline Contract failed).
+- NO-GO examples:
+	- run 22002791381 (completed failure, Build VI Package + Pipeline Contract failed)
+	- run 22004004032 (completed failure, Build VI Package + Pipeline Contract failed)
 - Active monitoring example: run 22005219153 (in_progress; packed libraries not yet present).
