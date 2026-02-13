@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/release-metrics.schema.json",
+  "title": "Release Metrics Snapshot",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_utc",
+    "owner_repo",
+    "consumer_run_id",
+    "consumer_run_url",
+    "release_tag",
+    "run_status",
+    "run_conclusion",
+    "duration_minutes",
+    "failed_job_count",
+    "missing_required_artifact_count",
+    "gate_outcome",
+    "rollback_triggered",
+    "top_failure_causes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "owner_repo": {
+      "type": "string"
+    },
+    "consumer_run_id": {
+      "type": "integer"
+    },
+    "consumer_run_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "release_tag": {
+      "type": "string"
+    },
+    "run_status": {
+      "type": "string"
+    },
+    "run_conclusion": {
+      "type": "string"
+    },
+    "duration_minutes": {
+      "type": "number",
+      "minimum": 0
+    },
+    "failed_job_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_required_artifact_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "gate_outcome": {
+      "type": "string",
+      "enum": [
+        "go",
+        "no-go"
+      ]
+    },
+    "rollback_triggered": {
+      "type": "boolean"
+    },
+    "top_failure_causes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failed_jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "conclusion"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "conclusion": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "missing_required_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}
