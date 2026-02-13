@@ -45,8 +45,9 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'consumer_parity_head_sha:'
     }
 
-    It 'packages vipm-cli-machine module in installer staging' {
+    It 'packages vipm-cli-machine and linux-ppl-container-build modules in installer staging' {
         $script:releaseContent | Should -Match 'Copy-Item -Path "\$env:GITHUB_WORKSPACE/vipm-cli-machine" -Destination "\$staging/vipm-cli-machine" -Recurse -Force'
+        $script:releaseContent | Should -Match 'Copy-Item -Path "\$env:GITHUB_WORKSPACE/linux-ppl-container-build" -Destination "\$staging/linux-ppl-container-build" -Recurse -Force'
     }
 
     It 'parity gate workflow validates required parity job names' {

@@ -14,10 +14,12 @@ Describe 'Skill layer manifest contract' {
         $script:manifest = Get-Content -Path $script:manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     }
 
-    It 'contains vipm-cli-machine module and v0.4.0 version' {
-        [string]$script:manifest.version | Should -Be '0.4.0'
+    It 'contains vipm-cli-machine and linux-ppl-container-build modules and v0.4.1 version' {
+        [string]$script:manifest.version | Should -Be '0.4.1'
         $script:manifest.modules.PSObject.Properties.Name | Should -Contain 'vipm-cli-machine'
         [string]$script:manifest.modules.'vipm-cli-machine'.path | Should -Be 'vipm-cli-machine'
+        $script:manifest.modules.PSObject.Properties.Name | Should -Contain 'linux-ppl-container-build'
+        [string]$script:manifest.modules.'linux-ppl-container-build'.path | Should -Be 'linux-ppl-container-build'
     }
 
     It 'has required_files entries that exist in the repository' {
