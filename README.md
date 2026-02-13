@@ -20,6 +20,7 @@ The release asset is pinned by the consumer lock file and validated by:
 
 Parity evidence contract:
 - Primary evidence source is this repository's `labview-parity-gate` workflow run URL.
+- `labview-parity-gate` performs a consumer sandbox preflight by cloning `consumer_ref`, asserting `HEAD == consumer_sha`, and emitting a static evidence artifact.
 - Consumer parity run URL is retained as secondary provenance in release notes.
 - Upstream `svelderrainruiz/labview-icon-editor` requires strict triple parity (`Linux`, `Self-Hosted`, `Windows`).
 - Fork consumers are accepted with container-only parity requirements (`Linux`, `Windows`).

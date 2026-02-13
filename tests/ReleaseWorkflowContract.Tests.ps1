@@ -38,6 +38,8 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'skills_parity_gate_run_id:'
         $script:releaseContent | Should -Match 'skills_parity_gate_run_attempt:'
         $script:releaseContent | Should -Match 'skills_parity_enforcement_profile:'
+        $script:releaseContent | Should -Match 'consumer_sandbox_checked_sha:'
+        $script:releaseContent | Should -Match 'consumer_sandbox_evidence_artifact:'
         $script:releaseContent | Should -Match 'consumer_parity_run_url:'
         $script:releaseContent | Should -Match 'consumer_parity_run_id:'
         $script:releaseContent | Should -Match 'consumer_parity_head_sha:'
@@ -54,6 +56,8 @@ Describe 'Release workflow contract' {
     }
 
     It 'parity gate workflow emits skills-run metadata outputs' {
+        $script:parityContent | Should -Match 'consumer_sandbox_checked_sha:'
+        $script:parityContent | Should -Match 'consumer_sandbox_evidence_artifact:'
         $script:parityContent | Should -Match 'gate_repo:'
         $script:parityContent | Should -Match 'gate_run_id:'
         $script:parityContent | Should -Match 'gate_run_url:'
@@ -61,10 +65,22 @@ Describe 'Release workflow contract' {
         $script:parityContent | Should -Match 'parity_enforcement_profile:'
     }
 
+    It 'parity gate workflow adds sandbox preflight by cloned consumer sha' {
+        $script:parityContent | Should -Match 'consumer-sandbox-preflight:'
+        $script:parityContent | Should -Match 'Checkout consumer repository snapshot'
+        $script:parityContent | Should -Match 'repository: \${{ inputs.consumer_repo }}'
+        $script:parityContent | Should -Match 'ref: \${{ inputs.consumer_ref }}'
+        $script:parityContent | Should -Match 'Sandbox preflight failed: checked out SHA'
+        $script:parityContent | Should -Match 'missing \.lvversion'
+        $script:parityContent | Should -Match 'Upload sandbox evidence artifact'
+        $script:parityContent | Should -Match 'needs: \[consumer-sandbox-preflight\]'
+    }
+
     It 'parity gate workflow applies upstream strict and fork container-only profiles' {
-        $script:parityContent | Should -Match 'if \[\[ "\$CONSUMER_REPO" == "svelderrainruiz/labview-icon-editor" \]\]'
+        $script:parityContent | Should -Match 'if \[\[ "\$PRECHECK_PROFILE" == "upstream-strict" \]\]'
         $script:parityContent | Should -Match 'parity_enforcement_profile="upstream-strict"'
         $script:parityContent | Should -Match 'parity_enforcement_profile="fork-container-only"'
+        $script:parityContent | Should -Match 'if \[\[ "\$PRECHECK_PROFILE" == "fork-container-only" \]\]'
         $script:parityContent | Should -Match 'dispatch_run_self_hosted="false"'
     }
 }

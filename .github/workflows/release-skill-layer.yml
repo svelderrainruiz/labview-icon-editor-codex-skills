@@ -154,6 +154,8 @@ jobs:
             "- consumer_repo: ${{ inputs.consumer_repo }}",
             "- consumer_ref: ${{ inputs.consumer_ref }}",
             "- consumer_sha: ${{ inputs.consumer_sha }}",
+            "- consumer_sandbox_checked_sha: ${{ needs.parity-gate.outputs.consumer_sandbox_checked_sha }}",
+            "- consumer_sandbox_evidence_artifact: ${{ needs.parity-gate.outputs.consumer_sandbox_evidence_artifact }}",
             "- consumer_parity_run_url: ${{ needs.parity-gate.outputs.parity_run_url }}",
             "- consumer_parity_run_id: ${{ needs.parity-gate.outputs.parity_run_id }}",
             "- consumer_parity_head_sha: ${{ needs.parity-gate.outputs.parity_head_sha }}",
