@@ -28,6 +28,8 @@ Provide a quick map of high-value CI jobs in labview-icon-editor so agents can t
 | Apply VIPC (LV x64) | environment prep | may block downstream tests |
 | Apply VIPC (LV x86) | environment prep | may block downstream tests |
 | Test Source Using LV 64-bit | runtime validation | release confidence gate |
+| Build 64-bit Packed Library | packed library build lane (new naming) | required for gate |
+| Build 32-bit Packed Library | packed library build lane (new naming) | required for gate |
 
 ## Known critical failures to prioritize
 - Build VI Package
@@ -56,3 +58,4 @@ When either fails, treat run as NO-GO for release dispatch.
 ## Notes
 This catalog should be refreshed when the consumer workflow job list changes.
 Current branch under active monitoring: reconcile/issue-91-forward-port-456.
+Latest observed naming includes both legacy container lane names and newer 32/64-bit packed-library lane names.
