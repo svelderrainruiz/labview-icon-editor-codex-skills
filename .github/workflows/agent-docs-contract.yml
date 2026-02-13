@@ -1,0 +1,30 @@
+name: agent-docs-contract
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'tests/AgentDocsContract.Tests.ps1'
+      - '.github/workflows/agent-docs-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+
+      - name: Run agent docs contract tests
+        shell: pwsh
+        run: |
+          Invoke-Pester -Path './tests/AgentDocsContract.Tests.ps1' -CI
