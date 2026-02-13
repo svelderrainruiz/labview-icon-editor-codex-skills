@@ -1,0 +1,202 @@
+name: labview-parity-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer_repo:
+        description: Consumer repository that owns the parity workflow.
+        required: true
+        default: svelderrainruiz/labview-icon-editor
+        type: string
+      consumer_ref:
+        description: Consumer ref to dispatch parity against.
+        required: true
+        type: string
+      consumer_sha:
+        description: Consumer commit SHA that parity must validate.
+        required: true
+        type: string
+      run_self_hosted:
+        description: Require self-hosted parity lane in the consumer run.
+        required: false
+        default: true
+        type: boolean
+      run_build_spec:
+        description: Require build-spec parity lane execution.
+        required: false
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      consumer_repo:
+        required: true
+        type: string
+      consumer_ref:
+        required: true
+        type: string
+      consumer_sha:
+        required: true
+        type: string
+      run_self_hosted:
+        required: false
+        default: true
+        type: boolean
+      run_build_spec:
+        required: false
+        default: true
+        type: boolean
+    outputs:
+      parity_run_id:
+        description: Dispatched consumer parity run identifier.
+        value: ${{ jobs.parity-gate.outputs.parity_run_id }}
+      parity_run_url:
+        description: Dispatched consumer parity run URL.
+        value: ${{ jobs.parity-gate.outputs.parity_run_url }}
+      parity_head_sha:
+        description: Head SHA reported by the consumer parity run.
+        value: ${{ jobs.parity-gate.outputs.parity_head_sha }}
+      parity_gate_passed:
+        description: True when parity gate validations passed.
+        value: ${{ jobs.parity-gate.outputs.parity_gate_passed }}
+
+permissions:
+  contents: read
+
+jobs:
+  parity-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      parity_run_id: ${{ steps.resolve.outputs.parity_run_id }}
+      parity_run_url: ${{ steps.verify.outputs.parity_run_url }}
+      parity_head_sha: ${{ steps.verify.outputs.parity_head_sha }}
+      parity_gate_passed: ${{ steps.verify.outputs.parity_gate_passed }}
+    steps:
+      - name: Validate parity gate token
+        env:
+          LVIE_PARITY_GATE_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${LVIE_PARITY_GATE_TOKEN:-}" ]]; then
+            echo "Missing required secret LVIE_PARITY_GATE_TOKEN." >&2
+            echo "Configure a token with repo+workflow scopes for cross-repo parity dispatch." >&2
+            exit 1
+          fi
+
+      - id: dispatch
+        name: Dispatch consumer parity workflow
+        env:
+          GH_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
+          CONSUMER_REPO: ${{ inputs.consumer_repo }}
+          CONSUMER_REF: ${{ inputs.consumer_ref }}
+          CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          RUN_BUILD_SPEC: ${{ inputs.run_build_spec }}
+          RUN_SELF_HOSTED: ${{ inputs.run_self_hosted }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          gh workflow run "LabVIEW Parity" \
+            --repo "$CONSUMER_REPO" \
+            --ref "$CONSUMER_REF" \
+            -f run_build_spec="$RUN_BUILD_SPEC" \
+            -f run_self_hosted="$RUN_SELF_HOSTED" \
+            -f expected_sha="$CONSUMER_SHA"
+
+      - id: resolve
+        name: Resolve dispatched consumer run id
+        env:
+          GH_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
+          CONSUMER_REPO: ${{ inputs.consumer_repo }}
+          CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 900))
+          parity_run_id=""
+
+          while [[ $SECONDS -lt $deadline ]]; do
+            runs_json="$(gh run list \
+              --repo "$CONSUMER_REPO" \
+              --workflow "LabVIEW Parity" \
+              --event workflow_dispatch \
+              --limit 50 \
+              --json databaseId,headSha,createdAt,url,status)"
+
+            parity_run_id="$(echo "$runs_json" | jq -r --arg sha "$CONSUMER_SHA" --arg started "$STARTED_AT" '[.[] | select(.headSha == $sha and .createdAt >= $started)] | sort_by(.createdAt) | reverse | .[0].databaseId // empty')"
+
+            if [[ -n "$parity_run_id" ]]; then
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [[ -z "$parity_run_id" ]]; then
+            echo "Unable to resolve dispatched LabVIEW Parity run for sha '$CONSUMER_SHA' in '$CONSUMER_REPO'." >&2
+            exit 1
+          fi
+
+          echo "parity_run_id=$parity_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for consumer parity completion
+        env:
+          GH_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
+          CONSUMER_REPO: ${{ inputs.consumer_repo }}
+          PARITY_RUN_ID: ${{ steps.resolve.outputs.parity_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$PARITY_RUN_ID" --repo "$CONSUMER_REPO"
+
+      - id: verify
+        name: Verify consumer parity run contract
+        env:
+          GH_TOKEN: ${{ secrets.LVIE_PARITY_GATE_TOKEN }}
+          CONSUMER_REPO: ${{ inputs.consumer_repo }}
+          CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          PARITY_RUN_ID: ${{ steps.resolve.outputs.parity_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_json="$(gh run view "$PARITY_RUN_ID" --repo "$CONSUMER_REPO" --json conclusion,headSha,url,jobs)"
+          run_conclusion="$(echo "$run_json" | jq -r '.conclusion // empty')"
+          run_head_sha="$(echo "$run_json" | jq -r '.headSha // empty')"
+          run_url="$(echo "$run_json" | jq -r '.url // empty')"
+
+          if [[ "$run_head_sha" != "$CONSUMER_SHA" ]]; then
+            echo "Parity gate failed: run headSha '$run_head_sha' does not match expected '$CONSUMER_SHA'." >&2
+            exit 1
+          fi
+
+          if [[ "$run_conclusion" != "success" ]]; then
+            echo "Parity gate failed: run conclusion is '$run_conclusion' (expected success)." >&2
+            echo "Run URL: $run_url" >&2
+            exit 1
+          fi
+
+          required_jobs=(
+            "Parity (Linux Container)"
+            "Parity (Self-Hosted Runner)"
+            "Parity (Windows Container)"
+          )
+
+          for job_name in "${required_jobs[@]}"; do
+            job_conclusion="$(echo "$run_json" | jq -r --arg n "$job_name" '[.jobs[] | select(.name == $n) | .conclusion][0] // empty')"
+            if [[ -z "$job_conclusion" ]]; then
+              echo "Parity gate failed: required job '$job_name' is missing." >&2
+              exit 1
+            fi
+            if [[ "$job_conclusion" != "success" ]]; then
+              echo "Parity gate failed: required job '$job_name' concluded '$job_conclusion'." >&2
+              exit 1
+            fi
+          done
+
+          echo "parity_run_url=$run_url" >> "$GITHUB_OUTPUT"
+          echo "parity_head_sha=$run_head_sha" >> "$GITHUB_OUTPUT"
+          echo "parity_gate_passed=true" >> "$GITHUB_OUTPUT"
+

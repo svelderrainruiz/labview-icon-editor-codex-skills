@@ -2,20 +2,57 @@ name: release-skill-layer
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+    inputs:
+      release_tag:
+        description: Release tag to publish (for example, v0.4.0).
+        required: true
+        type: string
+      consumer_repo:
+        description: Consumer repository that owns the parity gate run.
+        required: true
+        default: svelderrainruiz/labview-icon-editor
+        type: string
+      consumer_ref:
+        description: Consumer ref to dispatch parity against (branch/tag/ref).
+        required: true
+        type: string
+      consumer_sha:
+        description: Consumer commit SHA that parity must validate.
+        required: true
+        type: string
+      run_self_hosted:
+        description: Require self-hosted parity lane in the consumer parity run.
+        required: false
+        default: true
+        type: boolean
+      run_build_spec:
+        description: Require build-spec parity execution in the consumer parity run.
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
+  parity-gate:
+    uses: ./.github/workflows/labview-parity.yml
+    with:
+      consumer_repo: ${{ inputs.consumer_repo }}
+      consumer_ref: ${{ inputs.consumer_ref }}
+      consumer_sha: ${{ inputs.consumer_sha }}
+      run_self_hosted: ${{ inputs.run_self_hosted }}
+      run_build_spec: ${{ inputs.run_build_spec }}
+    secrets: inherit
+
   package:
+    needs: [parity-gate]
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
       asset_path: ${{ steps.package.outputs.asset_path }}
       asset_sha256: ${{ steps.package.outputs.asset_sha256 }}
+      nsis_root: ${{ steps.package.outputs.nsis_root }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,6 +112,7 @@ jobs:
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "nsis_root=$nsisRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -83,17 +121,20 @@ jobs:
           path: ${{ steps.package.outputs.asset_path }}
           if-no-files-found: error
 
-      - name: Publish release asset (tag only)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish release asset
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = $env:GITHUB_REF_NAME
-          $zipPath = '${{ steps.package.outputs.asset_path }}'
-          if (-not (Test-Path -Path $zipPath)) {
-            throw "Packaged asset not found: $zipPath"
+          $tag = '${{ inputs.release_tag }}'
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw 'release_tag input is required.'
+          }
+
+          $assetPath = '${{ steps.package.outputs.asset_path }}'
+          if (-not (Test-Path -Path $assetPath -PathType Leaf)) {
+            throw "Packaged asset not found: $assetPath"
           }
 
           $notes = @(
@@ -101,12 +142,21 @@ jobs:
             '',
             '- Asset: lvie-codex-skill-layer-installer.exe',
             '- SHA256: ${{ steps.package.outputs.asset_sha256 }}',
-            '- License: 0BSD'
+            '- License: 0BSD',
+            '',
+            'Release provenance:',
+            "- consumer_repo: ${{ inputs.consumer_repo }}",
+            "- consumer_ref: ${{ inputs.consumer_ref }}",
+            "- consumer_sha: ${{ inputs.consumer_sha }}",
+            "- parity_run_url: ${{ needs.parity-gate.outputs.parity_run_url }}",
+            "- parity_run_id: ${{ needs.parity-gate.outputs.parity_run_id }}",
+            "- parity_head_sha: ${{ needs.parity-gate.outputs.parity_head_sha }}",
+            "- nsis_root: ${{ steps.package.outputs.nsis_root }}"
           ) -join [Environment]::NewLine
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zipPath --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $tag $assetPath --repo $env:GITHUB_REPOSITORY --clobber
           } else {
-            gh release create $tag $zipPath --repo $env:GITHUB_REPOSITORY --title $tag --notes $notes
+            gh release create $tag $assetPath --repo $env:GITHUB_REPOSITORY --title $tag --notes $notes
           }
