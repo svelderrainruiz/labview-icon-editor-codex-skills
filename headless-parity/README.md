@@ -4,8 +4,8 @@ This module captures the fail-fast compatibility gate used in headless self-host
 
 ## Gate Requirements
 - `.lvversion` is canonical.
-- `lv_icon_editor.lvproj` root `LVVersion` must be compatible with `.lvversion`.
-- `Split-Path -Parent $PROJECT_PATH` must equal `REPO_ROOT`.
+- `lv_icon_editor.lvproj` root `LVVersion` is optional and not required for pass/fail.
+- Path ownership is resolved by `runner-cli parity context`; project-parent path matching is not required.
 
-Example mapping:
-- `.lvversion` `21.0` <-> `LVVersion="21008000"`
+## Preflight Command
+- `pwsh -NoProfile -File .\Tooling\Assert-LabVIEWVersion.ps1 -RepoRoot <repo>`

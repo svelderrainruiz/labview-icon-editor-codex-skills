@@ -10,6 +10,7 @@ Layered Codex skill assets for `labview-icon-editor` CI/runtime integrations.
   - `proactive-loop/*`
   - `headless-parity/*`
   - `belt-suspenders/*`
+  - `vipm-cli-machine/*`
 
 ## Release contract
 The release asset is pinned by the consumer lock file and validated by:

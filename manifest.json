@@ -1,6 +1,6 @@
 {
   "name": "lvie-codex-skill-layer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license_spdx": "0BSD",
   "license_file": "LICENSE",
   "generated_utc": null,
@@ -29,6 +29,12 @@
     "headless-parity/lvversion-lvproj-contract.json",
     "belt-suspenders/README.md",
     "belt-suspenders/runbook.md",
+    "vipm-cli-machine/SKILL.md",
+    "vipm-cli-machine/agents/openai.yaml",
+    "vipm-cli-machine/references/machine-inventory.md",
+    "vipm-cli-machine/references/safety-runbook.md",
+    "vipm-cli-machine/references/tool-contracts.md",
+    "vipm-cli-machine/scripts/Invoke-VipmCliToolProbe.ps1",
     "manifest.json",
     "LICENSE"
   ],
@@ -46,12 +52,16 @@
       "path": "proactive-loop"
     },
     "headless-parity": {
-      "description": "Headless preflight LVVersion/path contract",
+      "description": "Headless preflight .lvversion + runner-cli path contract",
       "path": "headless-parity"
     },
     "belt-suspenders": {
       "description": "Local+remote orchestration playbooks",
       "path": "belt-suspenders"
+    },
+    "vipm-cli-machine": {
+      "description": "Safe-first VIPM CLI machine workflows and contracts",
+      "path": "vipm-cli-machine"
     }
   }
 }

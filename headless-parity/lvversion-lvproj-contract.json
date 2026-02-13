@@ -1,15 +1,12 @@
 {
-  "contract_version": "1.0.0",
-  "preflight_command": "pwsh -NoProfile -File .\\Tooling\\Assert-LabVIEWVersion.ps1 -RepoRoot <repo> -ProjectPath <project> -EnforceProjectLvVersion",
-  "lvversion_to_lvproj_mapping": {
-    "numeric_major": "first two digits",
-    "minor_revision": "next two digits",
-    "example": {
-      "lvversion": "21.0",
-      "lvproj_lvversion": "21008000"
-    }
+  "contract_version": "1.1.0",
+  "preflight_command": "pwsh -NoProfile -File .\\Tooling\\Assert-LabVIEWVersion.ps1 -RepoRoot <repo>",
+  "version_contract": {
+    "source_of_truth": ".lvversion",
+    "project_lvversion_required": false
   },
   "path_contract": {
-    "rule": "Split-Path -Parent PROJECT_PATH == REPO_ROOT"
+    "owner": "runner-cli parity context",
+    "project_parent_match_required": false
   }
 }

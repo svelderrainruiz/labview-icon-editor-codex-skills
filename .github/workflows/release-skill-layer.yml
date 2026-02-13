@@ -72,6 +72,7 @@ jobs:
           Copy-Item -Path "$env:GITHUB_WORKSPACE/proactive-loop" -Destination "$staging/proactive-loop" -Recurse -Force
           Copy-Item -Path "$env:GITHUB_WORKSPACE/headless-parity" -Destination "$staging/headless-parity" -Recurse -Force
           Copy-Item -Path "$env:GITHUB_WORKSPACE/belt-suspenders" -Destination "$staging/belt-suspenders" -Recurse -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/vipm-cli-machine" -Destination "$staging/vipm-cli-machine" -Recurse -Force
 
           $manifestPath = Join-Path $staging 'manifest.json'
           $manifest = Get-Content -Raw -Path "$env:GITHUB_WORKSPACE/manifest.json" | ConvertFrom-Json
