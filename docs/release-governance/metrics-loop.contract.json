@@ -1,0 +1,29 @@
+{
+  "phase": "phase-4",
+  "name": "release-metrics-loop",
+  "schema_version": "1.0",
+  "cadence": "weekly",
+  "owner_role": "release-operator",
+  "required_metrics": [
+    "consumer_run_id",
+    "consumer_run_url",
+    "release_tag",
+    "run_status",
+    "run_conclusion",
+    "duration_minutes",
+    "failed_job_count",
+    "missing_required_artifact_count",
+    "gate_outcome",
+    "rollback_triggered"
+  ],
+  "gate_outcomes": [
+    "go",
+    "no-go"
+  ],
+  "minimum_review_fields": [
+    "review_window_utc",
+    "top_failure_causes",
+    "flaky_signal_candidates",
+    "actions_opened"
+  ]
+}
