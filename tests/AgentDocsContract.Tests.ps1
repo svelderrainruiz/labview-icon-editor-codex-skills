@@ -53,7 +53,7 @@ Describe 'Agent docs contract' {
             'core-conformance-linux-evidence',
             'core-conformance-windows-evidence'
         )) {
-            $content | Should -Match [regex]::Escape($artifact)
+            $content | Should -Match ([regex]::Escape($artifact))
         }
     }
 
