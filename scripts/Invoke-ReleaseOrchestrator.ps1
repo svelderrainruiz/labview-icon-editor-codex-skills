@@ -57,7 +57,9 @@ function Update-PlanDispatchSection {
   param(
     [string]$Path,
     [string]$Tag,
-    [bool]$Dispatched
+    [bool]$Dispatched,
+    [string]$StatePath,
+    [string]$DispatchPath
   )
 
   if (-not (Test-Path -Path $Path -PathType Leaf)) {
@@ -68,11 +70,49 @@ function Update-PlanDispatchSection {
   $content = $content -replace '- release_tag: TODO \(set next semver tag, example: v0\.4\.1\)', ('- release_tag: ' + $Tag)
   $content = $content -replace '- \[ \] Choose and record release_tag: .*', ('- [x] Choose and record release_tag: ' + $Tag)
 
+  if (-not [string]::IsNullOrWhiteSpace($StatePath)) {
+    $content = $content -replace '- release_state_json:.*', ('- release_state_json: ' + (Convert-ToPlanPath -PathValue $StatePath))
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($DispatchPath)) {
+    $content = $content -replace '- dispatch_result_json:.*', ('- dispatch_result_json: ' + (Convert-ToPlanPath -PathValue $DispatchPath))
+  }
+
   if ($Dispatched) {
     $content = $content -replace '- \[ \] Trigger release-skill-layer with prefilled inputs above', '- [x] Trigger release-skill-layer with prefilled inputs above'
   }
 
   Set-Content -Path $Path -Value $content -Encoding utf8
+}
+
+function Convert-ToPlanPath {
+  param(
+    [string]$PathValue
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $PathValue
+  }
+
+  try {
+    $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
+    $resolvedPath = $PathValue
+
+    if ([System.IO.Path]::IsPathRooted($PathValue)) {
+      $resolvedPath = (Resolve-Path -Path $PathValue).Path
+    } else {
+      $candidate = Join-Path $repoRoot $PathValue
+      if (Test-Path -Path $candidate) {
+        $resolvedPath = (Resolve-Path -Path $candidate).Path
+      } else {
+        $resolvedPath = $candidate
+      }
+    }
+
+    return [System.IO.Path]::GetRelativePath($repoRoot, $resolvedPath).Replace('\\', '/')
+  } catch {
+    return $PathValue
+  }
 }
 
 function Get-SkillRepo {
@@ -252,7 +292,7 @@ if (-not $ReleaseTag) {
   $ReleaseTag = "v$($manifest.version)"
 }
 
-Update-PlanDispatchSection -Path $PlanPath -Tag $ReleaseTag -Dispatched:$false
+Update-PlanDispatchSection -Path $PlanPath -Tag $ReleaseTag -Dispatched:$false -StatePath $releaseStatePath -DispatchPath $dispatchResultPath
 
 if (-not $isGo) {
   $noGoPayload = [pscustomobject]@{
@@ -309,7 +349,7 @@ $dispatchResult = Dispatch-ReleaseWorkflow `
   -DispatchRunBuildSpec:$RunBuildSpec `
   -TokenOverride $GitHubToken
 
-Update-PlanDispatchSection -Path $PlanPath -Tag $ReleaseTag -Dispatched:$true
+Update-PlanDispatchSection -Path $PlanPath -Tag $ReleaseTag -Dispatched:$true -StatePath $releaseStatePath -DispatchPath $dispatchResultPath
 
 $dispatchPayload = [pscustomobject]@{
   status = 'dispatched'

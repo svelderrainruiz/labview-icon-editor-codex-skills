@@ -80,6 +80,17 @@ while ($true) {
   $content = $content -replace 'Run conclusion:.*', ('Run conclusion: ' + ($(if ($null -eq $run.conclusion) { 'pending' } else { $run.conclusion })))
   $content = $content -replace 'Failed/cancelled/timed_out jobs observed:.*', ('Failed/cancelled/timed_out jobs observed: ' + $badJobs.Count)
   $content = $content -replace 'Missing required artifacts observed:.*', ('Missing required artifacts observed: ' + $missingArtifacts.Count)
+  if (-not [string]::IsNullOrWhiteSpace($StatePath)) {
+    $stateDisplayPath = $StatePath
+    try {
+      $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
+      $resolvedStatePath = (Resolve-Path -Path $StatePath).Path
+      $stateDisplayPath = [System.IO.Path]::GetRelativePath($repoRoot, $resolvedStatePath).Replace('\\', '/')
+    } catch {
+      $stateDisplayPath = $StatePath
+    }
+    $content = $content -replace '- release_state_json:.*', ('- release_state_json: ' + $stateDisplayPath)
+  }
 
   if ($run.status -eq 'completed') {
     $content = $content -replace ('- \[ \] Consumer run ' + $RunId + ' is fully completed \(status = completed\)'), ('- [x] Consumer run ' + $RunId + ' is fully completed (status = completed)')
