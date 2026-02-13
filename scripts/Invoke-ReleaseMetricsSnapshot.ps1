@@ -12,7 +12,10 @@ param(
   [string]$OutputDir,
 
   [Parameter(Mandatory = $false)]
-  [bool]$RollbackTriggered = $false
+  [bool]$RollbackTriggered = $false,
+
+  [Parameter(Mandatory = $false)]
+  [string]$GitHubToken
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,10 +32,33 @@ $runUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId"
 $jobsUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId/jobs?per_page=100"
 $artifactsUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId/artifacts?per_page=100"
 
-$headers = @{ 'User-Agent' = 'codex-release-metrics' }
-$run = Invoke-RestMethod -Uri $runUrl -Headers $headers
-$jobs = Invoke-RestMethod -Uri $jobsUrl -Headers $headers
-$artifacts = Invoke-RestMethod -Uri $artifactsUrl -Headers $headers
+function Get-GitHubJson {
+  param(
+    [string]$Path
+  )
+
+  $gh = Get-Command gh -ErrorAction SilentlyContinue
+  if ($gh) {
+    $ghOutput = & gh api $Path
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ghOutput)) {
+      return ($ghOutput | ConvertFrom-Json -ErrorAction Stop)
+    }
+  }
+
+  $headers = @{ 'User-Agent' = 'codex-release-metrics' }
+  $token = if ($GitHubToken) { $GitHubToken } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }
+  if (-not [string]::IsNullOrWhiteSpace($token)) {
+    $headers.Authorization = "Bearer $token"
+    $headers.Accept = 'application/vnd.github+json'
+    $headers.'X-GitHub-Api-Version' = '2022-11-28'
+  }
+
+  return (Invoke-RestMethod -Uri ("https://api.github.com/{0}" -f $Path) -Headers $headers)
+}
+
+$run = Get-GitHubJson -Path "repos/$OwnerRepo/actions/runs/$RunId"
+$jobs = Get-GitHubJson -Path "repos/$OwnerRepo/actions/runs/$RunId/jobs?per_page=100"
+$artifacts = Get-GitHubJson -Path "repos/$OwnerRepo/actions/runs/$RunId/artifacts?per_page=100"
 
 if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
   $manifestPath = Join-Path (Join-Path $PSScriptRoot '..') 'manifest.json'

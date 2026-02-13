@@ -1,0 +1,24 @@
+﻿{
+    "schema_version":  "1.0",
+    "generated_utc":  "2026-02-13T23:32:18.3554997Z",
+    "owner_repo":  "svelderrainruiz/labview-icon-editor",
+    "consumer_run_id":  22005219153,
+    "consumer_run_url":  "https://github.com/svelderrainruiz/labview-icon-editor/actions/runs/22005219153",
+    "release_tag":  "v0.4.1",
+    "run_status":  "completed",
+    "run_conclusion":  "success",
+    "duration_minutes":  42,
+    "failed_job_count":  0,
+    "missing_required_artifact_count":  0,
+    "gate_outcome":  "go",
+    "rollback_triggered":  false,
+    "top_failure_causes":  [
+
+                           ],
+    "failed_jobs":  [
+
+                    ],
+    "missing_required_artifacts":  [
+
+                                   ]
+}

@@ -1,0 +1,55 @@
+﻿{
+    "schema_version":  "1.0",
+    "generated_utc":  "2026-02-13T23:34:13.3749861Z",
+    "owner_repo":  "svelderrainruiz/labview-icon-editor",
+    "run_id":  22005219153,
+    "run_url":  "https://github.com/svelderrainruiz/labview-icon-editor/actions/runs/22005219153",
+    "run_status":  "completed",
+    "run_conclusion":  "success",
+    "required_artifacts":  [
+                               "lv_icon_x64.lvlibp",
+                               "lv_icon_x86.lvlibp",
+                               "conformance-full",
+                               "core-conformance-linux-evidence",
+                               "core-conformance-windows-evidence"
+                           ],
+    "observed_artifacts":  [
+                               "run-manifest",
+                               "vip-prerelease-requirements-lint",
+                               "runner-cli-linux-x64",
+                               "runner-cli-win-x64",
+                               "core-conformance-linux-evidence",
+                               "core-conformance-windows-evidence",
+                               "pylavi-validate-strict-log",
+                               "pylavi-validate-offenders-strict",
+                               "pylavi-validate-legacy-log",
+                               "pylavi-validate-offenders-legacy",
+                               "conformance-full",
+                               "vipc-audit-64",
+                               "vipc-apply-log-64",
+                               "vipc-audit-32",
+                               "vipc-apply-log-32",
+                               "lv_icon_x64.lvlibp",
+                               "lv_icon_x86.lvlibp",
+                               "vip-build-status",
+                               "release_notes_0.1.0.1720",
+                               "ni_icon_editor-0.1.0.1720",
+                               "labviewcli-logs",
+                               "prerelease-publish-status"
+                           ],
+    "missing_required_artifacts":  [
+
+                                   ],
+    "bad_jobs":  [
+
+                 ],
+    "gate":  {
+                 "is_completed":  true,
+                 "is_success":  true,
+                 "has_no_bad_jobs":  true,
+                 "has_required_artifacts":  true
+             },
+    "is_go_eligible":  true,
+    "plan_path":  "D:\\workspace\\labview-icon-editor-codex-skills\\release-plan-22005219153.md",
+    "phase":  "terminal"
+}
