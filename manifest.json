@@ -1,6 +1,6 @@
 {
   "name": "lvie-codex-skill-layer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "license_spdx": "0BSD",
   "license_file": "LICENSE",
   "generated_utc": null,
@@ -27,6 +27,9 @@
     "proactive-loop/sequence-diagnostics.schema.json",
     "headless-parity/README.md",
     "headless-parity/lvversion-lvproj-contract.json",
+    "linux-ppl-container-build/README.md",
+    "linux-ppl-container-build/SKILL.md",
+    "linux-ppl-container-build/contract.json",
     "belt-suspenders/README.md",
     "belt-suspenders/runbook.md",
     "vipm-cli-machine/SKILL.md",
@@ -54,6 +57,10 @@
     "headless-parity": {
       "description": "Headless preflight .lvversion + runner-cli path contract",
       "path": "headless-parity"
+    },
+    "linux-ppl-container-build": {
+      "description": "Linux Docker container PPL build skill and contract",
+      "path": "linux-ppl-container-build"
     },
     "belt-suspenders": {
       "description": "Local+remote orchestration playbooks",

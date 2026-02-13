@@ -9,6 +9,7 @@ Layered Codex skill assets for `labview-icon-editor` CI/runtime integrations.
   - `lunit-contract/*`
   - `proactive-loop/*`
   - `headless-parity/*`
+  - `linux-ppl-container-build/*`
   - `belt-suspenders/*`
   - `vipm-cli-machine/*`
 
