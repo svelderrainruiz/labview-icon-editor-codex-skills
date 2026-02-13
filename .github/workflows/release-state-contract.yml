@@ -20,13 +20,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Pester
+      - name: Ensure Pester
         shell: pwsh
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+          $minimum = [version]'5.0.0'
+          $installed = Get-Module -ListAvailable -Name Pester |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+
+          if ($installed -and $installed.Version -ge $minimum) {
+            Write-Host "Using preinstalled Pester $($installed.Version)"
+          } else {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion $minimum
+          }
 
       - name: Run release-state contract tests
         shell: pwsh
         run: |
+          Import-Module Pester -MinimumVersion 5.0.0
           Invoke-Pester -Path './tests/ReleaseStateContract.Tests.ps1' -CI
