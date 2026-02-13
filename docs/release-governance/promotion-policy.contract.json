@@ -1,0 +1,51 @@
+{
+  "name": "phase-3-promotion-policy",
+  "version": "1.0",
+  "description": "Promotion lane contract from canary to stable for skill-layer releases.",
+  "lanes": [
+    {
+      "name": "canary",
+      "required_checks": [
+        "release-state-contract",
+        "docs-contract"
+      ],
+      "required_release_gates": [
+        "status=completed",
+        "conclusion=success",
+        "no_failed_required_jobs",
+        "required_artifacts_present"
+      ],
+      "required_evidence": [
+        "release-state-<runId>.json",
+        "dispatch-result-<runId>.json"
+      ],
+      "exit_criteria": [
+        "one successful canary release",
+        "no rollback trigger observed"
+      ]
+    },
+    {
+      "name": "stable",
+      "depends_on": "canary",
+      "required_checks": [
+        "release-state-contract",
+        "docs-contract"
+      ],
+      "required_release_gates": [
+        "status=completed",
+        "conclusion=success",
+        "no_failed_required_jobs",
+        "required_artifacts_present"
+      ],
+      "required_evidence": [
+        "provenance-bundle-checklist.md",
+        "release-state-<runId>.json",
+        "dispatch-result-<runId>.json"
+      ],
+      "exit_criteria": [
+        "all provenance fields present",
+        "maintainer promotion approval"
+      ]
+    }
+  ]
+}

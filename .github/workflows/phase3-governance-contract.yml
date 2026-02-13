@@ -1,0 +1,40 @@
+name: phase3-governance-contract
+
+on:
+  pull_request:
+    paths:
+      - 'docs/release-governance/**'
+      - 'tests/Phase3GovernanceContract.Tests.ps1'
+      - '.github/workflows/phase3-governance-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase3-governance-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure Pester
+        shell: pwsh
+        run: |
+          $minimum = [version]'5.0.0'
+          $installed = Get-Module -ListAvailable -Name Pester |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+
+          if ($installed -and $installed.Version -ge $minimum) {
+            Write-Host "Using preinstalled Pester $($installed.Version)"
+          } else {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion $minimum
+          }
+
+      - name: Run Phase 3 governance contract tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0.0
+          Invoke-Pester -Path './tests/Phase3GovernanceContract.Tests.ps1' -CI
