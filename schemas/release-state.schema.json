@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/release-state.schema.json",
+  "title": "Release State",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_utc",
+    "owner_repo",
+    "run_id",
+    "run_status",
+    "run_conclusion",
+    "required_artifacts",
+    "missing_required_artifacts",
+    "bad_jobs",
+    "gate",
+    "is_go_eligible",
+    "plan_path"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "generated_utc": { "type": "string", "format": "date-time" },
+    "owner_repo": { "type": "string" },
+    "run_id": { "type": "integer" },
+    "run_url": { "type": "string" },
+    "run_status": { "type": "string" },
+    "run_conclusion": { "type": "string" },
+    "required_artifacts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "observed_artifacts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "missing_required_artifacts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "bad_jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "conclusion"],
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": ["string", "null"] },
+          "conclusion": { "type": ["string", "null"] },
+          "html_url": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": [
+        "is_completed",
+        "is_success",
+        "has_no_bad_jobs",
+        "has_required_artifacts"
+      ],
+      "properties": {
+        "is_completed": { "type": "boolean" },
+        "is_success": { "type": "boolean" },
+        "has_no_bad_jobs": { "type": "boolean" },
+        "has_required_artifacts": { "type": "boolean" }
+      }
+    },
+    "is_go_eligible": { "type": "boolean" },
+    "plan_path": { "type": "string" },
+    "release_tag": { "type": "string" },
+    "phase": { "type": "string" }
+  }
+}
