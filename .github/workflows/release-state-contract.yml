@@ -1,0 +1,32 @@
+name: release-state-contract
+
+on:
+  pull_request:
+    paths:
+      - 'schemas/**'
+      - 'scripts/Invoke-ReleaseOrchestrator.ps1'
+      - 'scripts/Watch-RunAndUpdatePlan.ps1'
+      - 'tests/ReleaseStateContract.Tests.ps1'
+      - '.github/workflows/release-state-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-state-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+
+      - name: Run release-state contract tests
+        shell: pwsh
+        run: |
+          Invoke-Pester -Path './tests/ReleaseStateContract.Tests.ps1' -CI
