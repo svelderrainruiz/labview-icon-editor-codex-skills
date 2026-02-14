@@ -162,7 +162,7 @@ if ($TriagePackageVipLinux.IsPresent) {
     'labview_community_edition=true',
     'linux_labview_image=nationalinstruments/labview:2026q1-linux',
     "windows_build_command=New-Item -ItemType Directory -Path 'consumer/resource/plugins' -Force | Out-Null; Set-Content -Path 'consumer/resource/plugins/lv_icon.lvlibp' -Value 'stub-ppl' -Encoding ascii",
-    "linux_build_command=New-Item -ItemType Directory -Path 'consumer/resource/plugins' -Force | Out-Null; Set-Content -Path 'consumer/resource/plugins/lv_icon.linux.lvlibp' -Value 'stub-linux-ppl' -Encoding ascii"
+    "linux_build_command=New-Item -ItemType Directory -Path 'consumer/resource/plugins' -Force | Out-Null; Set-Content -Path 'consumer/resource/plugins/lv_icon.lvlibp' -Value 'stub-linux-ppl' -Encoding ascii"
   )
 
   $normalizedWorkflowInputs += $triageInputs

@@ -49,7 +49,7 @@ on:
       linux_ppl_path:
         description: Relative path to the built PPL produced by the Linux step.
         required: true
-        default: consumer/resource/plugins/lv_icon.linux.lvlibp
+        default: consumer/resource/plugins/lv_icon.lvlibp
         type: string
       linux_ppl_target_path:
         description: Relative path where Linux packaging installs the Windows-built PPL.

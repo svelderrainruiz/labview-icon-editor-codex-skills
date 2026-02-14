@@ -100,7 +100,7 @@ Installer contract:
 - `consumer_ref`: `main` (or release branch/SHA)
 - `windows_build_command`: `` (empty => auto build command)
 - `windows_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_ppl_path`: `consumer/resource/plugins/lv_icon.linux.lvlibp`
+- `linux_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
 - `linux_ppl_target_path`: `consumer/resource/plugins/lv_icon.lvlibp`
 - `linux_consume_linux_ppl_path`: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - `vipm_project_path`: `consumer/Tooling/deployment/NI Icon editor.vipb`
