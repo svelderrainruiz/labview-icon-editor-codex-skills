@@ -23,6 +23,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
         $script:scriptContent | Should -Match '\$DisplayInformationJson'
         $script:scriptContent | Should -Match '\$OutputDirectory'
         $script:scriptContent | Should -Match '\$UpdateScriptPath'
+        $script:scriptContent | Should -Match '\$ProfileResolutionPath'
         $script:scriptContent | Should -Match 'vipb\.before\.xml'
         $script:scriptContent | Should -Match 'vipb\.after\.xml'
         $script:scriptContent | Should -Match 'prepare-vipb\.status\.json'
@@ -30,6 +31,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
         $script:scriptContent | Should -Match 'vipb-diagnostics\.json'
         $script:scriptContent | Should -Match 'vipb-diagnostics-summary\.md'
         $script:scriptContent | Should -Match 'display-information\.input\.json'
+        $script:scriptContent | Should -Match 'profile-resolution\.input\.json'
     }
 
     It 'writes full diagnostics outputs on success path' {
@@ -42,6 +44,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             $vipbPath = Join-Path $tempRoot 'fixture.vipb'
             $releaseNotesPath = Join-Path $tempRoot 'release_notes.md'
             $outputDir = Join-Path $tempRoot 'output'
+            $profileResolutionPath = Join-Path $tempRoot 'profile-resolution.json'
 
             @'
 <VI_Package_Builder_Settings>
@@ -87,6 +90,22 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
                 'Legal Copyright' = 'fixture-copyright'
                 'Release Notes - Change Log' = 'release notes fixture'
             } | ConvertTo-Json -Depth 6 -Compress
+            @'
+{
+  "selected_profile_id": "lv2026",
+  "comparison_result": "match",
+  "warning_required": false,
+  "warning_message": "",
+  "profile": {
+    "lvversion_raw": "26.0",
+    "expected_vipb_target": "26.0 (64-bit)"
+  },
+  "consumer": {
+    "lvversion_raw": "26.0",
+    "expected_vipb_target": "26.0 (64-bit)"
+  }
+}
+'@ | Set-Content -LiteralPath $profileResolutionPath -Encoding UTF8
 
             & $script:scriptPath `
                 -RepoRoot $repoRootPath `
@@ -107,6 +126,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
                 -SourceSha 'abc123' `
                 -BuildRunId '111' `
                 -BuildRunAttempt '1' `
+                -ProfileResolutionPath $profileResolutionPath `
                 -UpdateScriptPath $script:updateScriptPath
 
             foreach ($requiredFile in @(
@@ -121,7 +141,8 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
                 'vipb-diagnostics-summary.md',
                 'prepare-vipb.status.json',
                 'prepare-vipb.log',
-                'display-information.input.json'
+                'display-information.input.json',
+                'profile-resolution.input.json'
             )) {
                 Test-Path -LiteralPath (Join-Path $outputDir $requiredFile) -PathType Leaf | Should -BeTrue
             }
@@ -136,10 +157,14 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             [string]$diagnostics.version_authority.lvversion_raw | Should -Be '26.0'
             [string]$diagnostics.version_authority.expected_vipb_target | Should -Be '26.0 (64-bit)'
             [string]$diagnostics.version_authority.check_result | Should -Be 'pass'
+            [string]$diagnostics.profile_advisory.profile_id | Should -Be 'lv2026'
+            [string]$diagnostics.profile_advisory.comparison_result | Should -Be 'match'
+            [bool]$diagnostics.profile_advisory.warning_emitted | Should -BeFalse
 
             $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
             $summary | Should -Match '## VIPB Diagnostics Suite'
             $summary | Should -Match '### Version Authority'
+            $summary | Should -Match '### Profile Advisory'
             $summary | Should -Match '### Changed Fields Quick View'
             $summary | Should -Match '### File Inventory'
             $summary | Should -Match '\| Label \| Path \| Exists \| Size \(bytes\) \| SHA256 \|'
@@ -149,6 +174,121 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             $summary | Should -Not -Match 'System\.Collections\.Specialized\.OrderedDictionary\.path'
             $summary | Should -Not -Match '(?m)^## VIPB Metadata Delta\s*$'
             $summary | Should -Match '### Field Delta'
+            $summary | Should -Match 'Consumer remains authoritative for VIPB target enforcement'
+        }
+        finally {
+            if (Test-Path -LiteralPath $tempRoot -PathType Container) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
+
+    It 'captures advisory mismatch metadata without failing when consumer authority still passes' {
+        $tempRoot = Join-Path $env:TEMP ("vipb-diag-advisory-mismatch-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        try {
+            $repoRootPath = Join-Path $tempRoot 'repo'
+            New-Item -Path $repoRootPath -ItemType Directory -Force | Out-Null
+            '26.0' | Set-Content -LiteralPath (Join-Path $repoRootPath '.lvversion') -Encoding ASCII
+
+            $vipbPath = Join-Path $tempRoot 'fixture.vipb'
+            $releaseNotesPath = Join-Path $tempRoot 'release_notes.md'
+            $outputDir = Join-Path $tempRoot 'output'
+            $profileResolutionPath = Join-Path $tempRoot 'profile-resolution.json'
+
+            @'
+<VI_Package_Builder_Settings>
+  <Library_General_Settings>
+    <Library_Version>0.0.0.0</Library_Version>
+    <Package_LabVIEW_Version>26.0 (64-bit)</Package_LabVIEW_Version>
+    <Company_Name>old-company</Company_Name>
+    <Product_Name>old-product</Product_Name>
+  </Library_General_Settings>
+  <Advanced_Settings>
+    <Description>
+      <One_Line_Description_Summary>old-summary</One_Line_Description_Summary>
+      <Packager>old-packager</Packager>
+      <URL>https://example.invalid</URL>
+      <Copyright>old-copyright</Copyright>
+      <Release_Notes>old-notes</Release_Notes>
+      <Description>old-description</Description>
+    </Description>
+    <License_Agreement_Filepath>old-license</License_Agreement_Filepath>
+    <Source_Files>
+      <Exclusions>
+        <Path>builds</Path>
+      </Exclusions>
+    </Source_Files>
+  </Advanced_Settings>
+</VI_Package_Builder_Settings>
+'@ | Set-Content -LiteralPath $vipbPath -Encoding UTF8
+            'notes' | Set-Content -LiteralPath $releaseNotesPath -Encoding UTF8
+            @'
+{
+  "selected_profile_id": "lv2025",
+  "comparison_result": "mismatch",
+  "warning_required": true,
+  "warning_message": "Selected profile differs from consumer target. Consumer remains authoritative.",
+  "profile": {
+    "lvversion_raw": "25.0",
+    "expected_vipb_target": "25.0 (64-bit)"
+  },
+  "consumer": {
+    "lvversion_raw": "26.0",
+    "expected_vipb_target": "26.0 (64-bit)"
+  }
+}
+'@ | Set-Content -LiteralPath $profileResolutionPath -Encoding UTF8
+
+            $displayInfo = @{
+                'Package Version' = @{
+                    major = 0
+                    minor = 1
+                    patch = 0
+                    build = 1
+                }
+                'Company Name' = 'fixture-company'
+                'Product Name' = 'fixture-product'
+                'Product Description Summary' = 'fixture-summary'
+                'Product Description' = 'fixture-description'
+                'Author Name (Person or Company)' = 'fixture-author'
+                'Product Homepage (URL)' = 'https://github.com/example/repo'
+                'Legal Copyright' = 'fixture-copyright'
+                'Release Notes - Change Log' = 'notes'
+            } | ConvertTo-Json -Depth 6 -Compress
+
+            & $script:scriptPath `
+                -RepoRoot $repoRootPath `
+                -VipbPath $vipbPath `
+                -ReleaseNotesFile $releaseNotesPath `
+                -DisplayInformationJson $displayInfo `
+                -LabVIEWVersionYear 2026 `
+                -LabVIEWMinorRevision 0 `
+                -SupportedBitness '64' `
+                -Major 0 `
+                -Minor 1 `
+                -Patch 0 `
+                -Build 1 `
+                -Commit 'abc123' `
+                -OutputDirectory $outputDir `
+                -ProfileResolutionPath $profileResolutionPath `
+                -UpdateScriptPath $script:updateScriptPath
+
+            $LASTEXITCODE | Should -Be 0
+
+            $status = Get-Content -LiteralPath (Join-Path $outputDir 'prepare-vipb.status.json') -Raw | ConvertFrom-Json
+            [string]$status.status | Should -BeIn @('updated', 'no_changes')
+
+            $diagnostics = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics.json') -Raw | ConvertFrom-Json
+            [string]$diagnostics.profile_advisory.comparison_result | Should -Be 'mismatch'
+            [bool]$diagnostics.profile_advisory.warning_emitted | Should -BeTrue
+            [string]$diagnostics.profile_advisory.profile_expected_vipb_target | Should -Be '25.0 (64-bit)'
+            [string]$diagnostics.profile_advisory.consumer_expected_vipb_target | Should -Be '26.0 (64-bit)'
+
+            $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
+            $summary | Should -Match '### Profile Advisory'
+            $summary | Should -Match 'Comparison result: `mismatch`'
+            $summary | Should -Match 'Warning emitted: `true`'
         }
         finally {
             if (Test-Path -LiteralPath $tempRoot -PathType Container) {

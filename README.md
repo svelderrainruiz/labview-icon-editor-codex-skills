@@ -36,17 +36,25 @@ Installer contract:
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
-- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
+- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch` (optional `labview_profile`, default `lv2026`).
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
 - Pipeline order:
   - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
   - `contract-tests` -> `gather-release-notes`
-  - `contract-tests` + `gather-release-notes` -> `prepare-vipb-linux`
+  - `contract-tests` -> `resolve-labview-profile`
+  - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
   - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
+- LabVIEW profiles (advisory):
+  - profile catalog is repo-owned under `profiles/labview`.
+  - profile id resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
+  - profile mismatch vs consumer emits `::warning` + summary advisory, but does not override build target.
+  - consumer `.lvversion` remains authoritative for VIPB target enforcement.
 - VIPB version authority contract:
   - `prepare-vipb-linux` treats `consumer/.lvversion` as authoritative for VIPB LabVIEW target.
   - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
   - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
+- Failure triage:
+  - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
 - PPL source contract (CI Pipeline lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
   - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
@@ -75,6 +83,8 @@ Installer contract:
   - `docker-contract-release-notes-<run_id>` containing:
     - `release_notes.md`
     - `release-notes-manifest.json` (SHA256 and size for the gathered release notes payload)
+  - `docker-contract-labview-profile-resolution-<run_id>` containing:
+    - `profile-resolution.json` (selected profile, consumer target, mismatch classification, warning message)
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
     - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
     - `vipb.before.xml`, `vipb.after.xml`
@@ -84,6 +94,7 @@ Installer contract:
     - `prepare-vipb.status.json`, `prepare-vipb.error.json` (failure path)
     - `prepare-vipb.log`
     - `display-information.input.json`
+    - `profile-resolution.input.json`
   - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
     - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
@@ -121,58 +132,6 @@ Installer contract:
 - VIPM activation contract on NI image:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/VipmCliActivationContract.Tests.ps1'`
   - Covers `VIPM_COMMUNITY_EDITION=true` => `vipm activate` preflight behavior.
-
-## Windows->Linux VI Package flow
-- Workflow: `.github/workflows/windows-linux-vipm-package.yml`
-- Purpose: build PPL in Windows LabVIEW image, then build VI Package in Linux LabVIEW image using the exact Windows-built PPL artifact.
-
-### Handoff contract
-- Windows stage emits artifact bundle with:
-  - PPL file
-  - `ppl-manifest.json` containing `ppl_sha256`, `labview_version`, `bitness`, source/run provenance.
-- Linux stage verifies:
-  - bundle manifest exists,
-  - bundle SHA256 matches manifest,
-  - optional explicit SHA matches producer output,
-  - `labview_version` and `bitness` match workflow inputs.
-
-### Dispatch inputs you must provide
-- `consumer_ref`: branch/tag/SHA to build/package.
-- `ppl_build_lane`: `linux-container` (recommended when host cannot run Docker Windows containers) or `windows-container`.
-
-### Optional override inputs
-- `windows_build_command`: custom command for Windows PPL build. Leave blank to use built-in container parity command.
-- `linux_build_command`: custom command for Linux PPL build. Leave blank to use built-in container parity command.
-- `windows_ppl_path`: path to generated PPL in workspace.
-- `linux_ppl_path`: path to generated Linux PPL in workspace.
-- `linux_consume_linux_ppl_path`: target path where Linux packaging installs Linux-built PPL.
-- `vipm_project_path`: path to `.vipb` (or path accepted by `vipm build`).
-- `vipm_cli_url` + `vipm_cli_sha256`: optional VIPM CLI archive source/checksum used when workflow must build `linux_labview_image` locally.
-- `vipm_cli_archive_type`: archive type for `vipm_cli_url` (`tar.gz`/`tgz`/`zip`; default `tar.gz`).
-- `labview_community_edition`: enables LabVIEW Community Edition mode in Linux container runs (default `true`).
-
-### Typical dispatch values
-- `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`
-- `linux_labview_image`: `nationalinstruments/labview:2026q1-linux-pwsh`
-- `consumer_repo`: `svelderrainruiz/labview-icon-editor`
-- `consumer_ref`: `develop` (or release branch/SHA)
-- `windows_build_command`: `` (empty => auto build command)
-- `windows_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_ppl_target_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_consume_linux_ppl_path`: `consumer/resource/plugins/lv_icon.linux.lvlibp`
-- `vipm_project_path`: `consumer/Tooling/deployment/NI Icon editor.vipb`
-- `labview_version`: `2026`
-- `bitness`: `64`
-
-### Notes
-- If your Windows host only supports Docker Linux containers, set `ppl_build_lane=linux-container` (default).
-- Workflow runs `build-ppl-windows` and `build-ppl-linux` in parallel, then packages using both consumed bundles (release-prep alignment).
-- Linux stage fails fast if `vipm` is not available in the selected Linux image.
-- If `vipm_community_edition=true`, Linux stage runs `vipm activate` before `vipm build`.
-- Local fast-triage helper for the Linux packaging step:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PackageVipLinuxLocal.ps1`
-  - Optional overrides: `-LinuxLabviewImage`, `-ConsumerPath`, `-VipmProjectPath`, `-VipmCommunityEdition:$false`
 
 ## Autonomous CI loop
 - Continuous autonomous branch integration helper:

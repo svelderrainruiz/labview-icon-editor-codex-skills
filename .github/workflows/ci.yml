@@ -6,6 +6,7 @@ on:
       - 'tests/**'
       - 'schemas/**'
       - 'scripts/**'
+      - 'profiles/**'
       - 'vipm-cli-machine/**'
       - 'docker/**'
       - 'docs/**'
@@ -13,6 +14,12 @@ on:
       - 'README.md'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
+    inputs:
+      labview_profile:
+        description: 'LabVIEW profile id from profiles/labview/profiles.json'
+        required: false
+        default: 'lv2026'
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +33,8 @@ env:
   WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
   LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
   VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
+  LABVIEW_PROFILES_ROOT: profiles/labview
+  DEFAULT_LABVIEW_PROFILE: lv2026
   LABVIEW_VERSION: '2026'
   BITNESS: '64'
 
@@ -415,9 +424,107 @@ jobs:
           path: ${{ runner.temp }}/release-notes-prepared
           if-no-files-found: error
 
+  resolve-labview-profile:
+    runs-on: ubuntu-latest
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - id: select-profile
+        name: Resolve selected LabVIEW profile id
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profileId = '${{ github.event.inputs.labview_profile }}'
+          if ([string]::IsNullOrWhiteSpace($profileId)) {
+            $profileId = $env:DEFAULT_LABVIEW_PROFILE
+          }
+          if ([string]::IsNullOrWhiteSpace($profileId)) {
+            throw 'Selected LabVIEW profile id is empty.'
+          }
+          "profile_id=$profileId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Selected LabVIEW profile id: $profileId"
+
+      - name: Resolve LabVIEW profile advisory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Resolve-LabviewProfile.ps1" `
+            -ProfilesRoot (Join-Path $env:GITHUB_WORKSPACE $env:LABVIEW_PROFILES_ROOT) `
+            -ProfileId '${{ steps.select-profile.outputs.profile_id }}' `
+            -ConsumerRepoRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -SupportedBitness '64' `
+            -OutputPath (Join-Path $bundleDir 'profile-resolution.json')
+
+      - name: Publish LabVIEW profile advisory summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
+          if (-not (Test-Path -LiteralPath $resolutionPath -PathType Leaf)) {
+            throw "Profile resolution output missing: $resolutionPath"
+          }
+
+          $resolution = Get-Content -LiteralPath $resolutionPath -Raw | ConvertFrom-Json
+          $comparison = [string]$resolution.comparison_result
+          $message = [string]$resolution.warning_message
+          $profileTarget = [string]$resolution.profile.expected_vipb_target
+          $consumerTarget = [string]$resolution.consumer.expected_vipb_target
+          $profileId = [string]$resolution.selected_profile_id
+
+          if ($comparison -eq 'mismatch') {
+            if ([string]::IsNullOrWhiteSpace($message)) {
+              $message = "Selected profile '$profileId' differs from consumer target. Consumer remains authoritative."
+            }
+            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $message)
+          }
+
+          @(
+            '## LabVIEW Profile Advisory'
+            ''
+            ('- Selected profile: `{0}`' -f $profileId)
+            ('- Comparison result: `{0}`' -f $comparison)
+            ('- Profile expected VIPB target: `{0}`' -f $profileTarget)
+            ('- Consumer expected VIPB target: `{0}`' -f $consumerTarget)
+            '- Consumer remains authoritative for VIPB target enforcement.'
+            '- Artifact: `docker-contract-labview-profile-resolution-${{ github.run_id }}`'
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload LabVIEW profile resolution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-labview-profile-resolution-${{ github.run_id }}
+          path: ${{ runner.temp }}/labview-profile-resolution
+          if-no-files-found: error
+
   prepare-vipb-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, gather-release-notes]
+    needs: [contract-tests, gather-release-notes, resolve-labview-profile]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -464,6 +571,12 @@ jobs:
           name: docker-contract-release-notes-${{ github.run_id }}
           path: ${{ runner.temp }}/release-notes-prepared
 
+      - name: Download LabVIEW profile resolution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-labview-profile-resolution-${{ github.run_id }}
+          path: ${{ runner.temp }}/labview-profile-resolution
+
       - name: Install gathered release notes for VIPB preparation
         shell: pwsh
         run: |
@@ -481,6 +594,25 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $profileResolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
+          if (-not (Test-Path -LiteralPath $profileResolutionPath -PathType Leaf)) {
+            throw "LabVIEW profile resolution file not found: $profileResolutionPath"
+          }
+          $profileResolution = Get-Content -LiteralPath $profileResolutionPath -Raw | ConvertFrom-Json
+          $comparison = [string]$profileResolution.comparison_result
+          if ($comparison -eq 'mismatch') {
+            $warningMessage = [string]$profileResolution.warning_message
+            if ([string]::IsNullOrWhiteSpace($warningMessage)) {
+              $warningMessage = 'Selected LabVIEW profile differs from consumer target. Consumer remains authoritative.'
+            }
+            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $warningMessage)
+          }
+
+          $overlayData = $null
+          if ($null -ne $profileResolution.profile -and $null -ne $profileResolution.profile.overlay_data) {
+            $overlayData = $profileResolution.profile.overlay_data
+          }
+
           $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
           $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
             Get-Content -Raw -Path $releaseNotesPath
@@ -503,6 +635,25 @@ jobs:
             "Product Description Summary" = "labview-icon-editor VI Package build."
             "Product Description" = "labview-icon-editor VI Package build."
             "Release Notes - Change Log" = $releaseNotes
+          }
+
+          if ($null -ne $overlayData) {
+            foreach ($property in $overlayData.PSObject.Properties) {
+              $key = [string]$property.Name
+              $overlayValue = $property.Value
+              if ([string]::IsNullOrWhiteSpace($key)) {
+                continue
+              }
+
+              if ($info.Contains($key)) {
+                $existingValue = $info[$key]
+                if ($null -ne $existingValue -and -not [string]::IsNullOrWhiteSpace([string]$existingValue)) {
+                  continue
+                }
+              }
+
+              $info[$key] = $overlayValue
+            }
           }
 
           $json = $info | ConvertTo-Json -Depth 6 -Compress
@@ -541,6 +692,7 @@ jobs:
             -SourceSha '${{ github.sha }}' `
             -BuildRunId '${{ github.run_id }}' `
             -BuildRunAttempt '${{ github.run_attempt }}' `
+            -ProfileResolutionPath (Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json') `
             -UpdateScriptPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-VipbDisplayInfo.ps1')
 
       - name: Publish VIPB diagnostics summary
@@ -579,20 +731,117 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $statusPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/prepare-vipb.status.json'
+          $bundleRoot = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux'
+          $statusPath = Join-Path $bundleRoot 'prepare-vipb.status.json'
+          $errorPath = Join-Path $bundleRoot 'prepare-vipb.error.json'
+          $diagnosticsPath = Join-Path $bundleRoot 'vipb-diagnostics.json'
+          $summaryPath = Join-Path $bundleRoot 'vipb-diagnostics-summary.md'
+          $logPath = Join-Path $bundleRoot 'prepare-vipb.log'
+          $artifactName = 'docker-contract-vipb-prepared-linux-${{ github.run_id }}'
+
+          function Try-ReadJsonFile {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              return $null
+            }
+
+            try {
+              return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            } catch {
+              Write-Warning ("Unable to parse {0} JSON at '{1}': {2}" -f $Label, $Path, $_.Exception.Message)
+              return $null
+            }
+          }
+
           if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) {
             throw "VIPB diagnostics status file missing: $statusPath"
           }
 
-          $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+          $statusPayload = Try-ReadJsonFile -Path $statusPath -Label 'status payload'
+          if ($null -eq $statusPayload -or [string]::IsNullOrWhiteSpace([string]$statusPayload.status)) {
+            throw "VIPB diagnostics status payload missing or unparseable: $statusPath"
+          }
+
           $status = [string]$statusPayload.status
           if ($status -eq 'failed') {
-            $errorPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/prepare-vipb.error.json'
-            throw "VIPB diagnostics suite failed. See '$errorPath'."
+            $errorPayload = Try-ReadJsonFile -Path $errorPath -Label 'error payload'
+            $diagnosticsPayload = Try-ReadJsonFile -Path $diagnosticsPath -Label 'diagnostics payload'
+
+            $reason = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.message)) {
+              [string]$errorPayload.message
+            } elseif (Test-Path -LiteralPath $errorPath -PathType Leaf) {
+              'status failed but error payload missing/unparseable'
+            } else {
+              'status failed but error payload file is missing'
+            }
+            $errorType = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.type)) {
+              [string]$errorPayload.type
+            } else {
+              'unknown'
+            }
+            $authorityCheck = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.version_authority_check)) {
+              [string]$errorPayload.version_authority_check
+            } elseif ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.check_result)) {
+              [string]$diagnosticsPayload.version_authority.check_result
+            } else {
+              'unknown'
+            }
+            $expectedTarget = if ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.expected_vipb_target)) {
+              [string]$diagnosticsPayload.version_authority.expected_vipb_target
+            } else {
+              ''
+            }
+            $observedTarget = if ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.observed_vipb_target)) {
+              [string]$diagnosticsPayload.version_authority.observed_vipb_target
+            } else {
+              ''
+            }
+
+            Write-Host ("::error title=VIPB diagnostics failed::{0}" -f $reason)
+            Write-Host '::group::VIPB diagnostics failure context'
+            Write-Host ("status={0}" -f $status)
+            Write-Host ("reason={0}" -f $reason)
+            Write-Host ("error_type={0}" -f $errorType)
+            Write-Host ("authority_check={0}" -f $authorityCheck)
+            if (-not [string]::IsNullOrWhiteSpace($expectedTarget)) {
+              Write-Host ("lvversion_expected_target={0}" -f $expectedTarget)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($observedTarget)) {
+              Write-Host ("vipb_observed_target={0}" -f $observedTarget)
+            }
+            Write-Host ("artifact={0}" -f $artifactName)
+            Write-Host ("status_path={0}" -f $statusPath)
+            Write-Host ("error_path={0}" -f $errorPath)
+            Write-Host ("diagnostics_path={0}" -f $diagnosticsPath)
+            Write-Host ("summary_path={0}" -f $summaryPath)
+            Write-Host ("log_path={0}" -f $logPath)
+            Write-Host '::endgroup::'
+
+            @(
+              '## VIPB Failure Gate'
+              ''
+              '- Status: `failed`'
+              ('- Reason: `{0}`' -f $reason)
+              ('- Error type: `{0}`' -f $errorType)
+              ('- Authority check: `{0}`' -f $authorityCheck)
+              ('- Artifact: `{0}`' -f $artifactName)
+              ('- Summary path: `{0}`' -f $summaryPath)
+              ('- Error payload path: `{0}`' -f $errorPath)
+              ('- Diagnostics path: `{0}`' -f $diagnosticsPath)
+              ('- Log path: `{0}`' -f $logPath)
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+            throw "VIPB diagnostics failed: $reason. See '$summaryPath' and artifact '$artifactName'."
           }
 
           if ('${{ steps.vipb_diag.outcome }}' -eq 'failure') {
-            throw "VIPB diagnostics execution step failed despite non-failed status '$status'."
+            throw "VIPB diagnostics execution step failed despite non-failed status '$status'. Check '$summaryPath' and '$diagnosticsPath'."
           }
           Write-Host "VIPB diagnostics suite completed with status '$status'."
 

@@ -47,7 +47,9 @@ param(
     [string]$BuildRunId = $env:GITHUB_RUN_ID,
     [string]$BuildRunAttempt = $env:GITHUB_RUN_ATTEMPT,
 
-    [string]$UpdateScriptPath = 'scripts/Update-VipbDisplayInfo.ps1'
+    [string]$UpdateScriptPath = 'scripts/Update-VipbDisplayInfo.ps1',
+
+    [string]$ProfileResolutionPath
 )
 
 Set-StrictMode -Version Latest
@@ -338,6 +340,7 @@ $paths = [ordered]@{
     before_hash_path = Join-Path $resolvedOutputDirectory 'vipb.before.sha256'
     after_hash_path = Join-Path $resolvedOutputDirectory 'vipb.after.sha256'
     prepared_vipb_path = Join-Path $resolvedOutputDirectory 'NI Icon editor.vipb'
+    profile_resolution_input_path = Join-Path $resolvedOutputDirectory 'profile-resolution.input.json'
 }
 
 if (Test-Path -LiteralPath $paths.log_path -PathType Leaf) {
@@ -363,6 +366,7 @@ $resolvedRepoRoot = $null
 $resolvedVipbPath = $null
 $resolvedReleaseNotesPath = $null
 $resolvedUpdateScriptPath = $null
+$resolvedProfileResolutionPath = $null
 $versionAuthority = [ordered]@{
     repo_root = $null
     lvversion_path = $null
@@ -374,6 +378,17 @@ $versionAuthority = [ordered]@{
     observed_vipb_target = $null
     check_result = 'unknown'
 }
+$profileAdvisory = [ordered]@{
+    profile_id = ''
+    profile_lvversion_raw = ''
+    profile_expected_vipb_target = ''
+    consumer_lvversion_raw = ''
+    consumer_expected_vipb_target = ''
+    comparison_result = 'not_provided'
+    warning_emitted = $false
+    warning_message = ''
+    resolution_path = ''
+}
 
 Write-Log "Starting VIPB diagnostics suite."
 
@@ -382,6 +397,9 @@ try {
     $resolvedVipbPath = Resolve-FullPath -Path $VipbPath
     $resolvedReleaseNotesPath = Resolve-FullPath -Path $ReleaseNotesFile
     $resolvedUpdateScriptPath = Resolve-FullPath -Path $UpdateScriptPath
+    if (-not [string]::IsNullOrWhiteSpace($ProfileResolutionPath)) {
+        $resolvedProfileResolutionPath = Resolve-FullPath -Path $ProfileResolutionPath
+    }
 
     if (-not (Test-Path -LiteralPath $resolvedVipbPath -PathType Leaf)) {
         throw "VIPB file not found: $resolvedVipbPath"
@@ -406,6 +424,53 @@ try {
     }
     else {
         'fail'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($resolvedProfileResolutionPath)) {
+        if (-not (Test-Path -LiteralPath $resolvedProfileResolutionPath -PathType Leaf)) {
+            throw "Profile resolution file not found: $resolvedProfileResolutionPath"
+        }
+
+        $profileResolutionRaw = Get-Content -LiteralPath $resolvedProfileResolutionPath -Raw -ErrorAction Stop
+        Copy-Item -LiteralPath $resolvedProfileResolutionPath -Destination $paths.profile_resolution_input_path -Force
+
+        try {
+            $profileResolution = $profileResolutionRaw | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "Profile resolution JSON is invalid: $resolvedProfileResolutionPath"
+        }
+
+        $profileObject = Get-OptionalPropertyValue -Object $profileResolution -PropertyName 'profile' -DefaultValue $null
+        $consumerObject = Get-OptionalPropertyValue -Object $profileResolution -PropertyName 'consumer' -DefaultValue $null
+        $comparisonResult = [string](Get-OptionalPropertyValue -Object $profileResolution -PropertyName 'comparison_result' -DefaultValue 'unknown')
+        if ([string]::IsNullOrWhiteSpace($comparisonResult)) {
+            $comparisonResult = 'unknown'
+        }
+        $warningMessage = [string](Get-OptionalPropertyValue -Object $profileResolution -PropertyName 'warning_message' -DefaultValue '')
+
+        $profileAdvisory.profile_id = [string](Get-OptionalPropertyValue -Object $profileResolution -PropertyName 'selected_profile_id' -DefaultValue '')
+        $profileAdvisory.profile_lvversion_raw = [string](Get-OptionalPropertyValue -Object $profileObject -PropertyName 'lvversion_raw' -DefaultValue '')
+        $profileAdvisory.profile_expected_vipb_target = [string](Get-OptionalPropertyValue -Object $profileObject -PropertyName 'expected_vipb_target' -DefaultValue '')
+        $profileAdvisory.consumer_lvversion_raw = [string](Get-OptionalPropertyValue -Object $consumerObject -PropertyName 'lvversion_raw' -DefaultValue '')
+        $profileAdvisory.consumer_expected_vipb_target = [string](Get-OptionalPropertyValue -Object $consumerObject -PropertyName 'expected_vipb_target' -DefaultValue '')
+        $profileAdvisory.comparison_result = $comparisonResult
+        $profileAdvisory.warning_message = $warningMessage
+        $profileAdvisory.warning_emitted = [bool](
+            [string]::Equals($comparisonResult, 'mismatch', [System.StringComparison]::OrdinalIgnoreCase)
+        )
+        $profileAdvisory.resolution_path = $resolvedProfileResolutionPath
+
+        if ($profileAdvisory.warning_emitted) {
+            $advisoryMessage = if (-not [string]::IsNullOrWhiteSpace($warningMessage)) {
+                $warningMessage
+            } else {
+                "Selected profile '$($profileAdvisory.profile_id)' differs from consumer target. Consumer remains authoritative."
+            }
+            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $advisoryMessage)
+            Write-Log ("PROFILE_ADVISORY: {0}" -f $advisoryMessage)
+        } else {
+            Write-Log ("PROFILE_ADVISORY: comparison_result={0}" -f $comparisonResult)
+        }
     }
 
     $displayInfoRaw = [string]$DisplayInformationJson
@@ -506,6 +571,7 @@ catch {
         vipb_path = $VipbPath
         release_notes_path = $ReleaseNotesFile
         version_authority_check = $versionAuthority.check_result
+        profile_advisory_comparison = $profileAdvisory.comparison_result
     }
     Write-Log ("ERROR: {0}" -f $errorPayload.message)
 }
@@ -516,6 +582,7 @@ finally {
     $beforeSnapshotInfo = Get-FileSnapshotInfo -Path $paths.before_snapshot_path
     $afterSnapshotInfo = Get-FileSnapshotInfo -Path $paths.after_snapshot_path
     $preparedVipbInfo = Get-FileSnapshotInfo -Path $paths.prepared_vipb_path
+    $profileResolutionInputInfo = Get-FileSnapshotInfo -Path $paths.profile_resolution_input_path
     $diffInfo = Get-FileSnapshotInfo -Path $paths.diff_path
     $diffSummaryInfo = Get-FileSnapshotInfo -Path $paths.diff_summary_path
     $displayInfoInput = Get-FileSnapshotInfo -Path $paths.display_info_input_path
@@ -551,7 +618,7 @@ finally {
     $statusInfo = Get-FileSnapshotInfo -Path $paths.status_path
 
     $diagnostics = [ordered]@{
-        summary_format_version = 2
+        summary_format_version = 3
         status = $status
         started_utc = $startedUtc.ToString('o')
         completed_utc = $completedUtc.ToString('o')
@@ -571,6 +638,7 @@ finally {
             bitness = $SupportedBitness
         }
         version_authority = $versionAuthority
+        profile_advisory = $profileAdvisory
         package_version = [ordered]@{
             major = $Major
             minor = $Minor
@@ -595,6 +663,7 @@ finally {
             status_json = $statusInfo
             error_json = $errorInfo
             log_file = (Get-FileSnapshotInfo -Path $paths.log_path)
+            profile_resolution_input = $profileResolutionInputInfo
         }
         tooling = [ordered]@{
             pwsh_version = $PSVersionTable.PSVersion.ToString()
@@ -626,7 +695,8 @@ finally {
         (New-InventoryEntry -Label 'status_json' -Info $statusInfo -BasePath $workspaceRoot),
         (New-InventoryEntry -Label 'error_json' -Info $errorInfo -BasePath $workspaceRoot),
         (New-InventoryEntry -Label 'log_file' -Info (Get-FileSnapshotInfo -Path $paths.log_path) -BasePath $workspaceRoot),
-        (New-InventoryEntry -Label 'display_information_input' -Info $displayInfoInput -BasePath $workspaceRoot)
+        (New-InventoryEntry -Label 'display_information_input' -Info $displayInfoInput -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'profile_resolution_input' -Info $profileResolutionInputInfo -BasePath $workspaceRoot)
     )
 
     $diagnosticsSummary = New-Object 'System.Collections.Generic.List[string]'
@@ -646,6 +716,21 @@ finally {
     $diagnosticsSummary.Add(('- Expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.expected_vipb_target) -MaxLength 120)))
     $diagnosticsSummary.Add(('- Observed VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target) -MaxLength 120)))
     $diagnosticsSummary.Add(('- Authority check: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.check_result) -MaxLength 20)))
+    $diagnosticsSummary.Add('')
+    $diagnosticsSummary.Add('### Profile Advisory')
+    $diagnosticsSummary.Add('')
+    $diagnosticsSummary.Add(('- Selected profile: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_id) -MaxLength 80)))
+    $diagnosticsSummary.Add(('- Profile .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_lvversion_raw) -MaxLength 60)))
+    $diagnosticsSummary.Add(('- Profile expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_expected_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Consumer .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_lvversion_raw) -MaxLength 60)))
+    $diagnosticsSummary.Add(('- Consumer expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_expected_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Comparison result: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.comparison_result) -MaxLength 20)))
+    $warningEmittedText = if ($profileAdvisory.warning_emitted) { 'true' } else { 'false' }
+    $diagnosticsSummary.Add(('- Warning emitted: `{0}`' -f $warningEmittedText))
+    if (-not [string]::IsNullOrWhiteSpace([string]$profileAdvisory.warning_message)) {
+        $diagnosticsSummary.Add(('- Advisory: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.warning_message) -MaxLength 260)))
+    }
+    $diagnosticsSummary.Add('- Consumer remains authoritative for VIPB target enforcement.')
     $diagnosticsSummary.Add('')
     $diagnosticsSummary.Add('### Changed Fields Quick View')
     $diagnosticsSummary.Add('')
