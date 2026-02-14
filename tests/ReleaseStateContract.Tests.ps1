@@ -48,4 +48,13 @@ Describe 'Release state Phase 2 contract' {
         $script:orchestratorContent | Should -Match 'dispatch-result-\{0\}\.json'
         $script:orchestratorContent | Should -Match 'Write-DispatchResult'
     }
+
+    It 'supports runner-cli dispatch backend with existing fallback modes' {
+        $script:orchestratorContent | Should -Match "DispatchBackend\s*=\s*'auto'"
+        $script:orchestratorContent | Should -Match "ValidateSet\('auto', 'runner-cli', 'gh', 'rest'\)"
+        $script:orchestratorContent | Should -Match 'function\s+Test-RunnerCliAvailability'
+        $script:orchestratorContent | Should -Match "method\s*=\s*'runner-cli'"
+        $script:orchestratorContent | Should -Match "method\s*=\s*'gh'"
+        $script:orchestratorContent | Should -Match "method\s*=\s*'rest'"
+    }
 }

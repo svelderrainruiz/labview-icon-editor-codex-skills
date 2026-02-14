@@ -124,6 +124,10 @@ Installer contract:
 - Pass workflow dispatch inputs (`key=value`) repeatedly:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=develop"`
   - If `consumer_ref` is omitted, the loop now defaults it to `develop`.
+- Backend selection (phase-1 runner-cli adapter):
+  - `-DispatchBackend auto|runner-cli|gh` (default `auto`)
+  - `-RunQueryBackend auto|runner-cli|gh` (default `auto`)
+  - In `auto`, loop prefers `runner-cli` when available and falls back to `gh`.
 - Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
   - Profile injects both `windows_build_command` and `linux_build_command` stubs so parallel PPL jobs can complete without consumer parity scripts.
@@ -132,4 +136,14 @@ Installer contract:
 - Optional JSONL log output:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
   - Each cycle now records `workflow_run.vipm_help_preview` with `observed`, `usage_line_observed`, `source`, and `check_error`.
+  - Each cycle also records `workflow_run.dispatch_response` with `exit_code` and `output_preview` from the dispatch command.
+  - `workflow_run.dispatch_response.method` indicates the backend used (`runner-cli` or `gh`).
   - Run correlation is pinned to dispatch time plus expected `HEAD` SHA to avoid selecting a different concurrent run on the same branch.
+
+## Release orchestrator backend selection
+- Script: `scripts/Invoke-ReleaseOrchestrator.ps1`
+- New optional switch:
+  - `-DispatchBackend auto|runner-cli|gh|rest` (default `auto`)
+- Behavior:
+  - `auto`: tries `runner-cli` (if present), then `gh`, then REST API token fallback.
+  - `runner-cli`/`gh`/`rest`: force a specific backend and fail fast if unavailable.
