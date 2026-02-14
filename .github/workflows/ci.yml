@@ -123,10 +123,10 @@ jobs:
           @(
             '## Source Project Remotes'
             ''
-            ("- Status: `{0}`" -f [string]$result.status)
-            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
-            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
-            ("- Action: `{0}`" -f [string]$result.action_taken)
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Run native LabVIEW 2020 LUnit smoke (x64)
@@ -1182,10 +1182,10 @@ jobs:
           @(
             '## Source Project Remotes'
             ''
-            ("- Status: `{0}`" -f [string]$result.status)
-            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
-            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
-            ("- Action: `{0}`" -f [string]$result.action_taken)
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Validate self-hosted native LabVIEW prerequisites
@@ -1455,10 +1455,10 @@ jobs:
           @(
             '## Source Project Remotes'
             ''
-            ("- Status: `{0}`" -f [string]$result.status)
-            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
-            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
-            ("- Action: `{0}`" -f [string]$result.action_taken)
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Download self-hosted VI Package artifact

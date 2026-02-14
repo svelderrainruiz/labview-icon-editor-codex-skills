@@ -189,6 +189,25 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'source-project-remotes\.result\.json'
     }
 
+    It 'keeps all source-project-remotes summary blocks parse-safe' {
+        $script:workflowContent | Should -Not -Match '\("- Upstream repo: `\{0\}`"'
+
+        $summaryBlockMatches = [regex]::Matches(
+            $script:workflowContent,
+            '- name: Assert source project remotes[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name:',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryBlockMatches.Count | Should -BeGreaterOrEqual 3
+
+        foreach ($match in $summaryBlockMatches) {
+            $summaryScript = $match.Groups['script'].Value
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+            @($errors).Count | Should -Be 0
+        }
+    }
+
     It 'runs VIPB diagnostics suite on linux and emits summary plus artifact' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:'
         $script:workflowContent | Should -Match 'Download LabVIEW target preset resolution artifact'
