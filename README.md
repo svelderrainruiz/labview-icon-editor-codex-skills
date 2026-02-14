@@ -39,16 +39,19 @@ Installer contract:
 
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
-- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
+- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, build a native self-hosted Windows VI package, then validate VIPM install/uninstall on x86.
 - Trigger: all pull requests and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
+  - `contract-tests` -> `run-lunit-smoke-lv2020` (required native smoke gate on self-hosted Windows)
   - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
   - `contract-tests` -> `gather-release-notes`
   - `contract-tests` -> `resolve-labview-profile`
   - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
-  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, and `prepare-vipb-linux`
+  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020`
+  - `build-vip-self-hosted` + `resolve-labview-profile` -> `install-vip-x86-self-hosted`
+  - `build-vip-self-hosted` + `install-vip-x86-self-hosted` -> `ci-self-hosted-final-gate`
 - LabVIEW target presets (advisory):
   - target preset catalog is repo-owned under `profiles/labview`.
   - target preset resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
@@ -72,13 +75,22 @@ Installer contract:
   - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - Native self-hosted packaging contract:
-  - runner labels: `[self-hosted, windows, self-hosted-windows-lv]`
+  - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
+  - required native LabVIEW 2020 smoke runner label: `[self-hosted, windows, self-hosted-windows-lv2020x64]`
+  - `run-lunit-smoke-lv2020` uses direct `g-cli lunit` contract commands and enforces required `64-bit` coverage only.
+  - `run-lunit-smoke-lv2020` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
   - `.vipb` flow in self-hosted lane is consume-only:
     - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
     - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
     - build native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
   - package version baseline for native lane: `0.1.0.<run_number>`
   - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
+  - post-package VIPM install smoke (`install-vip-x86-self-hosted`) runs with:
+    - `--labview-version <YYYY>` derived from source project `.lvversion` colocated with `lv_icon_editor.lvproj`
+    - fixed `--labview-bitness 32`
+    - install then uninstall for deterministic self-hosted hygiene
+    - dynamic runner label from `resolve-labview-profile` output: `self-hosted-windows-lv<YYYY>x86`
+  - final self-hosted merge gate: `ci-self-hosted-final-gate`
 - Published artifacts:
   - `docker-contract-ppl-windows-raw-x64-<run_id>` containing:
     - `consumer/resource/plugins/lv_icon.windows.lvlibp`
@@ -95,6 +107,13 @@ Installer contract:
     - `release-notes-manifest.json` (SHA256 and size for the gathered release notes payload)
   - `docker-contract-labview-profile-resolution-<run_id>` containing:
     - `profile-resolution.json` (selected target preset, source project target, mismatch classification, warning message)
+  - `docker-contract-lunit-smoke-lv2020-<run_id>` containing:
+    - `lunit-smoke.status.json`
+    - `lunit-smoke.result.json`
+    - `lunit-smoke.log`
+    - `reports/lunit-report-64.xml`
+    - `workspace/lvversion.before`
+    - `workspace/lvversion.after`
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
     - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
     - `vipb.before.xml`, `vipb.after.xml`
@@ -109,6 +128,16 @@ Installer contract:
     - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
+  - `docker-contract-vipm-install-x86-<run_id>` containing:
+    - `vipm-install.status.json`
+    - `vipm-install.result.json`
+    - `vipm-install.log`
+    - `commands/help.txt`
+    - `commands/list-before.txt`
+    - `commands/install.txt`
+    - `commands/list-after-install.txt`
+    - `commands/uninstall.txt`
+    - `commands/list-after-uninstall.txt`
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
 - Local diagnostics suite exercise (bounded Docker):
