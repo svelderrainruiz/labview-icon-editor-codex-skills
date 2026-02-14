@@ -379,6 +379,10 @@ $versionAuthority = [ordered]@{
     lvversion_minor = $null
     expected_vipb_target = $null
     observed_vipb_target = $null
+    observed_vipb_target_before = $null
+    observed_vipb_target_after = $null
+    input_mismatch = $null
+    input_mismatch_normalized = $null
     check_result = 'unknown'
 }
 $profileAdvisory = [ordered]@{
@@ -415,19 +419,15 @@ try {
     }
 
     $versionAuthority = Resolve-LvversionAuthorityInfo -RepoRootPath $resolvedRepoRoot -Bitness $SupportedBitness
-    $versionAuthority.observed_vipb_target = Get-VipbPackageLabVIEWVersion -VipbFilePath $resolvedVipbPath
-    $versionAuthority.check_result = if (
-        [string]::Equals(
-            [string]$versionAuthority.observed_vipb_target,
-            [string]$versionAuthority.expected_vipb_target,
-            [System.StringComparison]::Ordinal
-        )
-    ) {
-        'pass'
-    }
-    else {
-        'fail'
-    }
+    $versionAuthority.observed_vipb_target_before = Get-VipbPackageLabVIEWVersion -VipbFilePath $resolvedVipbPath
+    $versionAuthority.observed_vipb_target = $versionAuthority.observed_vipb_target_before
+    $versionAuthority.input_mismatch = -not [string]::Equals(
+        [string]$versionAuthority.observed_vipb_target_before,
+        [string]$versionAuthority.expected_vipb_target,
+        [System.StringComparison]::Ordinal
+    )
+    $versionAuthority.input_mismatch_normalized = $false
+    $versionAuthority.check_result = 'pending'
 
     if (-not [string]::IsNullOrWhiteSpace($resolvedProfileResolutionPath)) {
         if (-not (Test-Path -LiteralPath $resolvedProfileResolutionPath -PathType Leaf)) {
@@ -553,6 +553,30 @@ try {
         $diff = Get-Content -LiteralPath $paths.diff_path -Raw | ConvertFrom-Json
     } else {
         throw "Expected diff output was not produced: $($paths.diff_path)"
+    }
+
+    $versionAuthority.observed_vipb_target_after = Get-VipbPackageLabVIEWVersion -VipbFilePath $resolvedVipbPath
+    $versionAuthority.observed_vipb_target = $versionAuthority.observed_vipb_target_after
+    $outputMatchesAuthority = [string]::Equals(
+        [string]$versionAuthority.observed_vipb_target_after,
+        [string]$versionAuthority.expected_vipb_target,
+        [System.StringComparison]::Ordinal
+    )
+    $versionAuthority.check_result = if ($outputMatchesAuthority) { 'pass' } else { 'fail' }
+    $versionAuthority.input_mismatch_normalized = [bool]($versionAuthority.input_mismatch -and $outputMatchesAuthority)
+    if ($versionAuthority.input_mismatch_normalized) {
+        $normalizationMessage = (
+            "Input VIPB target '{0}' was normalized to authoritative target '{1}' from '{2}'." -f
+            $versionAuthority.observed_vipb_target_before, $versionAuthority.expected_vipb_target, $versionAuthority.lvversion_path
+        )
+        Write-Host ("::warning title=VIPB target normalized from source authority::{0}" -f $normalizationMessage)
+        Write-Log ("VERSION_AUTHORITY: {0}" -f $normalizationMessage)
+    }
+    if (-not $outputMatchesAuthority) {
+        throw (
+            "VIPB/.lvversion contract mismatch after update. VIPB Package_LabVIEW_Version '{0}' does not match .lvversion target '{1}' from '{2}'." -f
+            $versionAuthority.observed_vipb_target_after, $versionAuthority.expected_vipb_target, $versionAuthority.lvversion_path
+        )
     }
 
     $changedCount = 0
@@ -717,7 +741,12 @@ finally {
     $diagnosticsSummary.Add(('- .lvversion path: `{0}`' -f (Format-MarkdownCell -Value (Get-DisplayPath -Path ([string]$versionAuthority.lvversion_path) -BasePath $workspaceRoot) -MaxLength 260)))
     $diagnosticsSummary.Add(('- .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.lvversion_raw) -MaxLength 60)))
     $diagnosticsSummary.Add(('- Expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.expected_vipb_target) -MaxLength 120)))
-    $diagnosticsSummary.Add(('- Observed VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Observed VIPB target (before): `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target_before) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Observed VIPB target (after): `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target_after) -MaxLength 120)))
+    $inputMismatchText = if ($null -eq $versionAuthority.input_mismatch) { 'unknown' } elseif ([bool]$versionAuthority.input_mismatch) { 'true' } else { 'false' }
+    $normalizedText = if ($null -eq $versionAuthority.input_mismatch_normalized) { 'unknown' } elseif ([bool]$versionAuthority.input_mismatch_normalized) { 'true' } else { 'false' }
+    $diagnosticsSummary.Add(('- Input mismatch: `{0}`' -f $inputMismatchText))
+    $diagnosticsSummary.Add(('- Input mismatch normalized: `{0}`' -f $normalizedText))
     $diagnosticsSummary.Add(('- Authority check: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.check_result) -MaxLength 20)))
     $diagnosticsSummary.Add('')
     $diagnosticsSummary.Add('### Target Preset Advisory')

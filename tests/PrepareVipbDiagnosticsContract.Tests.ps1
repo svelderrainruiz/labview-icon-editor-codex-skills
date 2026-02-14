@@ -365,7 +365,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
         }
     }
 
-    It 'captures diagnostics and fails when VIPB target mismatches .lvversion authority' {
+    It 'captures diagnostics and normalizes mismatched VIPB target to .lvversion authority' {
         $tempRoot = Join-Path $env:TEMP ("vipb-diag-version-mismatch-{0}" -f [guid]::NewGuid().ToString('N'))
         New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
         try {
@@ -422,43 +422,41 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
                 'Release Notes - Change Log' = 'notes'
             } | ConvertTo-Json -Depth 6 -Compress
 
-            $failed = $false
-            try {
-                & $script:scriptPath `
-                    -RepoRoot $repoRootPath `
-                    -VipbPath $vipbPath `
-                    -ReleaseNotesFile $releaseNotesPath `
-                    -DisplayInformationJson $displayInfo `
-                    -LabVIEWVersionYear 2026 `
-                    -LabVIEWMinorRevision 0 `
-                    -SupportedBitness '64' `
-                    -Major 0 `
-                    -Minor 1 `
-                    -Patch 0 `
-                    -Build 1 `
-                    -Commit 'abc123' `
-                    -OutputDirectory $outputDir `
-                    -UpdateScriptPath $script:updateScriptPath
-            }
-            catch {
-                $failed = $true
-            }
+            & $script:scriptPath `
+                -RepoRoot $repoRootPath `
+                -VipbPath $vipbPath `
+                -ReleaseNotesFile $releaseNotesPath `
+                -DisplayInformationJson $displayInfo `
+                -LabVIEWVersionYear 2026 `
+                -LabVIEWMinorRevision 0 `
+                -SupportedBitness '64' `
+                -Major 0 `
+                -Minor 1 `
+                -Patch 0 `
+                -Build 1 `
+                -Commit 'abc123' `
+                -OutputDirectory $outputDir `
+                -UpdateScriptPath $script:updateScriptPath
 
-            $failed | Should -BeTrue
             $status = Get-Content -LiteralPath (Join-Path $outputDir 'prepare-vipb.status.json') -Raw | ConvertFrom-Json
-            [string]$status.status | Should -Be 'failed'
+            [string]$status.status | Should -Be 'updated'
 
             $diagnostics = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics.json') -Raw | ConvertFrom-Json
-            [string]$diagnostics.version_authority.check_result | Should -Be 'fail'
+            [string]$diagnostics.version_authority.check_result | Should -Be 'pass'
             [string]$diagnostics.version_authority.expected_vipb_target | Should -Be '26.0 (64-bit)'
-            [string]$diagnostics.version_authority.observed_vipb_target | Should -Be '20.0'
-
-            $errorPayload = Get-Content -LiteralPath (Join-Path $outputDir 'prepare-vipb.error.json') -Raw | ConvertFrom-Json
-            [string]$errorPayload.message | Should -Match 'VIPB/.lvversion contract mismatch'
+            [string]$diagnostics.version_authority.observed_vipb_target_before | Should -Be '20.0'
+            [string]$diagnostics.version_authority.observed_vipb_target_after | Should -Be '26.0 (64-bit)'
+            [string]$diagnostics.version_authority.observed_vipb_target | Should -Be '26.0 (64-bit)'
+            [bool]$diagnostics.version_authority.input_mismatch | Should -BeTrue
+            [bool]$diagnostics.version_authority.input_mismatch_normalized | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $outputDir 'prepare-vipb.error.json') -PathType Leaf | Should -BeFalse
 
             $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
             $summary | Should -Match '### Version Authority'
-            $summary | Should -Match 'Authority check: `fail`'
+            $summary | Should -Match 'Authority check: `pass`'
+            $summary | Should -Match 'Observed VIPB target \(before\): `20\.0`'
+            $summary | Should -Match 'Observed VIPB target \(after\): `26\.0 \(64-bit\)`'
+            $summary | Should -Match 'Input mismatch normalized: `true`'
         }
         finally {
             if (Test-Path -LiteralPath $tempRoot -PathType Container) {

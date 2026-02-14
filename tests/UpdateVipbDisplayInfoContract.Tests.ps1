@@ -248,7 +248,7 @@ Describe 'Update-Vipb.DisplayInfo script contract' {
         }
     }
 
-    It 'fails when VIPB Package_LabVIEW_Version does not match authoritative .lvversion target' {
+    It 'normalizes mismatched VIPB Package_LabVIEW_Version to authoritative .lvversion target' {
         $tempRoot = Join-Path $env:TEMP ("vipb-update-mismatch-{0}" -f [guid]::NewGuid().ToString('N'))
         New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
         try {
@@ -306,28 +306,34 @@ Describe 'Update-Vipb.DisplayInfo script contract' {
                 'Release Notes - Change Log' = 'release notes fixture'
             } | ConvertTo-Json -Depth 6 -Compress
 
-            $thrownMessage = $null
-            try {
-                & $script:scriptPath `
-                    -RepoRoot $repoRootPath `
-                    -VipbPath $vipbPath `
-                    -ReleaseNotesFile $releaseNotesPath `
-                    -DisplayInformationJson $displayInfo `
-                    -LabVIEWVersionYear 2026 `
-                    -LabVIEWMinorRevision 0 `
-                    -SupportedBitness '64' `
-                    -Major 0 `
-                    -Minor 1 `
-                    -Patch 0 `
-                    -Build 123 `
-                    -DiffOutputPath $diffPath `
-                    -SummaryMarkdownPath $summaryPath
-            }
-            catch {
-                $thrownMessage = $_.Exception.Message
-            }
+            & $script:scriptPath `
+                -RepoRoot $repoRootPath `
+                -VipbPath $vipbPath `
+                -ReleaseNotesFile $releaseNotesPath `
+                -DisplayInformationJson $displayInfo `
+                -LabVIEWVersionYear 2026 `
+                -LabVIEWMinorRevision 0 `
+                -SupportedBitness '64' `
+                -Major 0 `
+                -Minor 1 `
+                -Patch 0 `
+                -Build 123 `
+                -DiffOutputPath $diffPath `
+                -SummaryMarkdownPath $summaryPath
 
-            $thrownMessage | Should -Match 'VIPB/.lvversion contract mismatch'
+            [xml]$updatedVipb = Get-Content -LiteralPath $vipbPath -Raw
+            [string]$updatedVipb.VI_Package_Builder_Settings.Library_General_Settings.Package_LabVIEW_Version | Should -Be '26.0 (64-bit)'
+
+            $diff = Get-Content -LiteralPath $diffPath -Raw | ConvertFrom-Json
+            [string]$diff.authority.expected_vipb_target | Should -Be '26.0 (64-bit)'
+            [string]$diff.authority.input_vipb_target | Should -Be '20.0'
+            [string]$diff.authority.output_vipb_target | Should -Be '26.0 (64-bit)'
+            [bool]$diff.authority.input_mismatch | Should -BeTrue
+            [bool]$diff.authority.output_matches_authority | Should -BeTrue
+            [bool]$diff.authority.input_mismatch_normalized | Should -BeTrue
+
+            $summary = Get-Content -LiteralPath $summaryPath -Raw
+            $summary | Should -Match 'Authority input mismatch normalized: `true`'
         }
         finally {
             if (Test-Path -LiteralPath $tempRoot -PathType Container) {

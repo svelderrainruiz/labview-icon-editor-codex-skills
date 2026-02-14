@@ -272,13 +272,8 @@ try {
         throw "VIPB file is missing expected sections: Library_General_Settings and Advanced_Settings/Description."
     }
 
-    $currentVipbTarget = [string]$generalSettings.Package_LabVIEW_Version
-    if (-not [string]::Equals($currentVipbTarget, $authorityInfo.ExpectedVipbTarget, [System.StringComparison]::Ordinal)) {
-        throw (
-            "VIPB/.lvversion contract mismatch. VIPB Package_LabVIEW_Version '{0}' does not match .lvversion target '{1}' from '{2}'." -f
-            $currentVipbTarget, $authorityInfo.ExpectedVipbTarget, $authorityInfo.LvversionPath
-        )
-    }
+    $inputVipbTarget = [string]$generalSettings.Package_LabVIEW_Version
+    $inputTargetMismatch = -not [string]::Equals($inputVipbTarget, $authorityInfo.ExpectedVipbTarget, [System.StringComparison]::Ordinal)
 
     $changes = New-Object 'System.Collections.Generic.List[object]'
 
@@ -344,6 +339,17 @@ try {
     $vipbXml.Save($writer)
     $writer.Close()
 
+    [xml]$updatedVipbXml = Get-Content -LiteralPath $resolvedVipbPath -Raw -ErrorAction Stop
+    $outputVipbTarget = [string]$updatedVipbXml.VI_Package_Builder_Settings.Library_General_Settings.Package_LabVIEW_Version
+    $outputTargetMatchesAuthority = [string]::Equals($outputVipbTarget, $authorityInfo.ExpectedVipbTarget, [System.StringComparison]::Ordinal)
+    if (-not $outputTargetMatchesAuthority) {
+        throw (
+            "VIPB/.lvversion contract mismatch after update. VIPB Package_LabVIEW_Version '{0}' does not match .lvversion target '{1}' from '{2}'." -f
+            $outputVipbTarget, $authorityInfo.ExpectedVipbTarget, $authorityInfo.LvversionPath
+        )
+    }
+    $normalizedInputMismatch = $inputTargetMismatch -and $outputTargetMatchesAuthority
+
     $fieldEntries = $changes.ToArray()
     $changedEntries = @($fieldEntries | Where-Object { $_.changed })
 
@@ -354,6 +360,15 @@ try {
         changed_field_count = $changedEntries.Count
         changed_fields      = @($changedEntries | ForEach-Object { $_.field })
         fields              = $fieldEntries
+        authority           = [ordered]@{
+            lvversion_path                = $authorityInfo.LvversionPath
+            expected_vipb_target          = $authorityInfo.ExpectedVipbTarget
+            input_vipb_target             = $inputVipbTarget
+            output_vipb_target            = $outputVipbTarget
+            input_mismatch                = $inputTargetMismatch
+            output_matches_authority      = $outputTargetMatchesAuthority
+            input_mismatch_normalized     = $normalizedInputMismatch
+        }
     }
     $diff | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $resolvedDiffOutputPath -Encoding UTF8
 
@@ -369,6 +384,10 @@ try {
     $summaryLines.Add(("- Status: {0}" -f $status))
     $summaryLines.Add(("- Changed fields: {0} / {1}" -f $changedEntries.Count, $fieldEntries.Count))
     $summaryLines.Add(('- VIPB path: `{0}`' -f $resolvedVipbPath))
+    $summaryLines.Add(('- Authority expected target: `{0}`' -f $authorityInfo.ExpectedVipbTarget))
+    $summaryLines.Add(('- Authority input target: `{0}`' -f $inputVipbTarget))
+    $summaryLines.Add(('- Authority output target: `{0}`' -f $outputVipbTarget))
+    $summaryLines.Add(('- Authority input mismatch normalized: `{0}`' -f ($(if ($normalizedInputMismatch) { 'true' } else { 'false' }))))
     $summaryLines.Add('')
     $summaryLines.Add('| Field | Changed | Before | After |')
     $summaryLines.Add('| --- | --- | --- | --- |')
