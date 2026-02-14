@@ -26,7 +26,7 @@ on:
       windows_build_lane:
         description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
         required: true
-        default: linux-container
+        default: windows-hosted
         type: choice
         options:
           - linux-container
@@ -109,7 +109,7 @@ on:
       windows_build_lane:
         description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
         required: false
-        default: linux-container
+        default: windows-hosted
         type: string
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
@@ -205,6 +205,34 @@ jobs:
           if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
             docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
           fi
+
+      - name: Validate Windows PPL build prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.windows_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host 'windows_build_command provided; skipping default script-path validation.'
+            exit 0
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          if ('${{ inputs.windows_build_lane }}' -eq 'windows-hosted') {
+            $required = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-windows.ps1'
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Missing required consumer script '$required'. Provide inputs.windows_build_command or restore Tooling/container-parity assets in the consumer repo."
+            }
+          }
+          else {
+            $requiredLinux = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-linux.sh'
+            $requiredDevMode = Join-Path $consumerWorkspace 'Tooling/container-parity/devmode-linux.sh'
+            if (-not (Test-Path -LiteralPath $requiredLinux -PathType Leaf) -or -not (Test-Path -LiteralPath $requiredDevMode -PathType Leaf)) {
+              throw "Missing required consumer scripts '$requiredLinux' and/or '$requiredDevMode'. Provide inputs.windows_build_command or restore Tooling/container-parity assets in the consumer repo."
+            }
+          }
 
       - name: Build Windows PPL in NI Windows container
         shell: pwsh
@@ -340,6 +368,26 @@ jobs:
           if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
             docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
           fi
+
+      - name: Validate Linux PPL build prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.linux_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host 'linux_build_command provided; skipping default script-path validation.'
+            exit 0
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredLinux = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-linux.sh'
+          $requiredDevMode = Join-Path $consumerWorkspace 'Tooling/container-parity/devmode-linux.sh'
+          if (-not (Test-Path -LiteralPath $requiredLinux -PathType Leaf) -or -not (Test-Path -LiteralPath $requiredDevMode -PathType Leaf)) {
+            throw "Missing required consumer scripts '$requiredLinux' and/or '$requiredDevMode'. Provide inputs.linux_build_command or restore Tooling/container-parity assets in the consumer repo."
+          }
 
       - name: Build Linux PPL in NI Linux container
         shell: pwsh
