@@ -171,6 +171,13 @@ jobs:
             -BuildRunId "$env:GITHUB_RUN_ID" `
             -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
 
+      - name: Upload Windows raw PPL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-windows-raw-${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ env.WINDOWS_PPL_OUTPUT_PATH }}
+          if-no-files-found: error
+
       - name: Upload Windows PPL bundle artifact
         uses: actions/upload-artifact@v4
         with:
@@ -335,6 +342,13 @@ jobs:
             -BuildRunId "$env:GITHUB_RUN_ID" `
             -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
 
+      - name: Upload Linux raw PPL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-linux-raw-${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ env.LINUX_PPL_OUTPUT_PATH }}
+          if-no-files-found: error
+
       - name: Upload Linux PPL bundle artifact
         uses: actions/upload-artifact@v4
         with:
@@ -352,6 +366,8 @@ jobs:
       VERSION_BUILD: '${{ github.run_number }}'
       VERSION_COMMIT: '${{ github.sha }}'
       VIPM_TIMEOUT_SECONDS: '900'
+      LVIE_RUNNER_CLI_SKIP_BUILD: '1'
+      LVIE_RUNNER_CLI_SKIP_DOWNLOAD: '1'
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -534,6 +550,14 @@ jobs:
             -Commit $env:VERSION_COMMIT `
             -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
             -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON
+
+      - name: Upload modified VIPB (post-mortem)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipb-modified-self-hosted-${{ github.run_id }}
+          path: ${{ env.VIPB_PROJECT_PATH }}
+          if-no-files-found: warn
 
       - name: Build VI Package (LV 64-bit)
         shell: pwsh

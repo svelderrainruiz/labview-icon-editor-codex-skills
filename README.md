@@ -50,13 +50,20 @@ Installer contract:
   - runner labels: `[self-hosted, windows, self-hosted-windows-lv]`
   - `.vipb` inputs in self-hosted lane: consumed x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` (from Windows bundle) plus native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
   - package version baseline for native lane: `0.1.0.<run_number>`
+  - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
 - Published artifacts:
+  - `docker-contract-ppl-windows-raw-<run_id>` containing:
+    - `consumer/resource/plugins/lv_icon.windows.lvlibp`
   - `docker-contract-ppl-bundle-windows-<run_id>` containing:
     - `lv_icon.windows.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-ppl-linux-raw-<run_id>` containing:
+    - `consumer/resource/plugins/lv_icon.linux.lvlibp`
   - `docker-contract-ppl-bundle-linux-<run_id>` containing:
     - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
+    - modified `consumer/Tooling/deployment/NI Icon editor.vipb` emitted immediately after `Modify VIPB display info (LV 64-bit)` for post-mortem analysis
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
 - Local run (PowerShell image):

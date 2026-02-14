@@ -52,6 +52,8 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'Build Windows PPL in NI Windows container'
         $script:workflowContent | Should -Match 'runlabview-windows\.ps1'
         $script:workflowContent | Should -Match 'Create Windows PPL bundle manifest'
+        $script:workflowContent | Should -Match 'Upload Windows raw PPL artifact'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-windows-raw-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-windows-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Upload Windows PPL bundle artifact'
     }
@@ -64,6 +66,8 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match $expectedSedNormalization
         $script:workflowContent | Should -Match '"\$tmp_script_dir/runlabview-linux\.sh"'
         $script:workflowContent | Should -Match 'Create Linux PPL bundle manifest'
+        $script:workflowContent | Should -Match 'Upload Linux raw PPL artifact'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-linux-raw-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-linux-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Upload Linux PPL bundle artifact'
     }
@@ -76,6 +80,8 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_MAJOR:\s*''0'''
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_MINOR:\s*''1'''
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_PATCH:\s*''0'''
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?LVIE_RUNNER_CLI_SKIP_BUILD:\s*''1'''
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?LVIE_RUNNER_CLI_SKIP_DOWNLOAD:\s*''1'''
     }
 
     It 'bootstraps worktree context in self-hosted lane' {
@@ -99,6 +105,8 @@ Describe 'Docker contract CI workflow contract' {
     It 'stamps 0.1.0 version in native build calls and uploads self-hosted VIP artifact' {
         $script:workflowContent | Should -Match 'BuildProjectSpec\.ps1'
         $script:workflowContent | Should -Match 'ModifyVIPBDisplayInfo\.ps1'
+        $script:workflowContent | Should -Match 'Upload modified VIPB \(post-mortem\)'
+        $script:workflowContent | Should -Match 'docker-contract-vipb-modified-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Invoke-VipBuild\.ps1'
         $script:workflowContent | Should -Match '-Major \$env:VERSION_MAJOR'
         $script:workflowContent | Should -Match '-Minor \$env:VERSION_MINOR'
