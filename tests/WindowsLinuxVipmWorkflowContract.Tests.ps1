@@ -52,6 +52,8 @@ Describe 'Windows->Linux VIPM package workflow contract' {
 
     It 'fails when vipm is unavailable and uploads package artifacts when present' {
         $script:workflowContent | Should -Match 'vipm is not available on PATH inside Linux image'
+        $script:workflowContent | Should -Match 'vipm help preview \(first 20 lines\):'
+        $script:workflowContent | Should -Match 'vipm help 2>&1 \|\| vipm --help 2>&1'
         $script:workflowContent | Should -Match 'Upload VI Package artifacts'
     }
 }
