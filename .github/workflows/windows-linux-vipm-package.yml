@@ -100,6 +100,7 @@ jobs:
           $customCommand = @'
           ${{ inputs.windows_build_command }}
           '@.Trim()
+          $buildExitCode = 0
 
           if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
             Write-Host "Executing custom windows_build_command:"
@@ -126,6 +127,7 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:WINDOWS_LABVIEW_IMAGE" `
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+            $buildExitCode = $LASTEXITCODE
           }
           else {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
@@ -148,10 +150,11 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:LINUX_LABVIEW_IMAGE" `
               bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
+            $buildExitCode = $LASTEXITCODE
           }
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          if ($buildExitCode -ne 0) {
+            throw "Windows PPL build command failed with exit code $buildExitCode"
           }
 
       - id: bundle
