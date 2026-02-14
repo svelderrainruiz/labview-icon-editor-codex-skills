@@ -36,7 +36,7 @@ Installer contract:
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
-- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch` (optional `labview_profile`, default `lv2026`).
+- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
 - Pipeline order:
   - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
@@ -44,20 +44,20 @@ Installer contract:
   - `contract-tests` -> `resolve-labview-profile`
   - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
   - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
-- LabVIEW profiles (advisory):
-  - profile catalog is repo-owned under `profiles/labview`.
-  - profile id resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
-  - profile mismatch vs consumer emits `::warning` + summary advisory, but does not override build target.
-  - consumer `.lvversion` remains authoritative for VIPB target enforcement.
+- LabVIEW target presets (advisory):
+  - target preset catalog is repo-owned under `profiles/labview`.
+  - target preset resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
+  - target preset mismatch vs source project emits `::warning` + summary advisory, but does not override build target.
+  - source project `.lvversion` remains authoritative for VIPB target enforcement.
 - VIPB version authority contract:
-  - `prepare-vipb-linux` treats `consumer/.lvversion` as authoritative for VIPB LabVIEW target.
+  - `prepare-vipb-linux` treats `consumer/.lvversion` (source project) as authoritative for VIPB LabVIEW target.
   - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
   - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
 - Failure triage:
   - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
 - PPL source contract (CI Pipeline lane):
-  - consumer repo: `svelderrainruiz/labview-icon-editor`
-  - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
+  - source project repo: `svelderrainruiz/labview-icon-editor`
+  - source project ref: `patch/456-2020-migration-branch-from-9e46ecf`
   - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
   - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
@@ -84,7 +84,7 @@ Installer contract:
     - `release_notes.md`
     - `release-notes-manifest.json` (SHA256 and size for the gathered release notes payload)
   - `docker-contract-labview-profile-resolution-<run_id>` containing:
-    - `profile-resolution.json` (selected profile, consumer target, mismatch classification, warning message)
+    - `profile-resolution.json` (selected target preset, source project target, mismatch classification, warning message)
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
     - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
     - `vipb.before.xml`, `vipb.after.xml`

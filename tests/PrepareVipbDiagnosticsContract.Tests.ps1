@@ -164,7 +164,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
             $summary | Should -Match '## VIPB Diagnostics Suite'
             $summary | Should -Match '### Version Authority'
-            $summary | Should -Match '### Profile Advisory'
+            $summary | Should -Match '### Target Preset Advisory'
             $summary | Should -Match '### Changed Fields Quick View'
             $summary | Should -Match '### File Inventory'
             $summary | Should -Match '\| Label \| Path \| Exists \| Size \(bytes\) \| SHA256 \|'
@@ -174,7 +174,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             $summary | Should -Not -Match 'System\.Collections\.Specialized\.OrderedDictionary\.path'
             $summary | Should -Not -Match '(?m)^## VIPB Metadata Delta\s*$'
             $summary | Should -Match '### Field Delta'
-            $summary | Should -Match 'Consumer remains authoritative for VIPB target enforcement'
+            $summary | Should -Match 'Source project remains authoritative for VIPB target enforcement'
         }
         finally {
             if (Test-Path -LiteralPath $tempRoot -PathType Container) {
@@ -228,7 +228,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
   "selected_profile_id": "lv2025",
   "comparison_result": "mismatch",
   "warning_required": true,
-  "warning_message": "Selected profile differs from consumer target. Consumer remains authoritative.",
+  "warning_message": "Selected target preset differs from source project target. Source project remains authoritative.",
   "profile": {
     "lvversion_raw": "25.0",
     "expected_vipb_target": "25.0 (64-bit)"
@@ -286,7 +286,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             [string]$diagnostics.profile_advisory.consumer_expected_vipb_target | Should -Be '26.0 (64-bit)'
 
             $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
-            $summary | Should -Match '### Profile Advisory'
+            $summary | Should -Match '### Target Preset Advisory'
             $summary | Should -Match 'Comparison result: `mismatch`'
             $summary | Should -Match 'Warning emitted: `true`'
         }

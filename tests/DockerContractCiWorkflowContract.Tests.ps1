@@ -61,9 +61,9 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'checks out consumer and validates expected SHA in PPL, release-notes, and VIPB prep jobs' {
-        ([regex]::Matches($script:workflowContent, 'Checkout consumer repository')).Count | Should -BeGreaterOrEqual 4
-        ([regex]::Matches($script:workflowContent, 'Verify checked out consumer SHA')).Count | Should -BeGreaterOrEqual 4
-        $script:workflowContent | Should -Match 'Consumer SHA mismatch'
+        ([regex]::Matches($script:workflowContent, 'Checkout source project repository')).Count | Should -BeGreaterOrEqual 4
+        ([regex]::Matches($script:workflowContent, 'Verify checked out source project SHA')).Count | Should -BeGreaterOrEqual 4
+        $script:workflowContent | Should -Match 'Source project SHA mismatch'
     }
 
     It 'gathers release notes in a dedicated artifact job for VIPB prep consumption' {
@@ -76,12 +76,12 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'release_notes\.md'
     }
 
-    It 'resolves repo-owned LabVIEW profile advisory and uploads resolution artifact' {
+    It 'resolves repo-owned LabVIEW target preset advisory and uploads resolution artifact' {
         $script:workflowContent | Should -Match 'resolve-labview-profile:'
-        $script:workflowContent | Should -Match 'Resolve selected LabVIEW profile id'
+        $script:workflowContent | Should -Match 'Resolve selected LabVIEW target preset id'
         $script:workflowContent | Should -Match 'scripts/Resolve-LabviewProfile\.ps1'
-        $script:workflowContent | Should -Match '::warning title=LabVIEW profile advisory mismatch::'
-        $script:workflowContent | Should -Match '## LabVIEW Profile Advisory'
+        $script:workflowContent | Should -Match '::warning title=LabVIEW target preset advisory mismatch::'
+        $script:workflowContent | Should -Match '## LabVIEW Target Preset Advisory'
         $script:workflowContent | Should -Match 'Upload LabVIEW profile resolution artifact'
         $script:workflowContent | Should -Match 'docker-contract-labview-profile-resolution-\$\{\{\s*github\.run_id\s*\}\}'
     }
@@ -112,7 +112,7 @@ Describe 'Docker contract CI workflow contract' {
 
     It 'runs VIPB diagnostics suite on linux and emits summary plus artifact' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:'
-        $script:workflowContent | Should -Match 'Download LabVIEW profile resolution artifact'
+        $script:workflowContent | Should -Match 'Download LabVIEW target preset resolution artifact'
         $script:workflowContent | Should -Match 'docker-contract-labview-profile-resolution-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Run VIPB diagnostics suite'
         $script:workflowContent | Should -Match 'continue-on-error:\s*true'

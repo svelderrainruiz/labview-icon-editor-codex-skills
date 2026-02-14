@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       labview_profile:
-        description: 'LabVIEW profile id from profiles/labview/profiles.json'
+        description: 'LabVIEW target preset id from profiles/labview/profiles.json'
         required: false
         default: 'lv2026'
         type: string
@@ -72,22 +72,22 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - name: Validate Windows container parity assets
         shell: pwsh
@@ -95,7 +95,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $required = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/container-parity/runlabview-windows.ps1'
           if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-            throw "Missing required consumer script '$required'."
+            throw "Missing required source project script '$required'."
           }
 
       - name: Build Windows PPL in NI Windows container
@@ -201,22 +201,22 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - name: Validate Linux container parity assets
         shell: bash
@@ -372,22 +372,22 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - name: Gather release notes artifact content
         shell: pwsh
@@ -431,25 +431,25 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - id: select-profile
-        name: Resolve selected LabVIEW profile id
+        name: Resolve selected LabVIEW target preset id
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -458,12 +458,12 @@ jobs:
             $profileId = $env:DEFAULT_LABVIEW_PROFILE
           }
           if ([string]::IsNullOrWhiteSpace($profileId)) {
-            throw 'Selected LabVIEW profile id is empty.'
+            throw 'Selected LabVIEW target preset id is empty.'
           }
           "profile_id=$profileId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Selected LabVIEW profile id: $profileId"
+          Write-Host "Selected LabVIEW target preset id: $profileId"
 
-      - name: Resolve LabVIEW profile advisory
+      - name: Resolve LabVIEW target preset advisory
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -480,14 +480,14 @@ jobs:
             -SupportedBitness '64' `
             -OutputPath (Join-Path $bundleDir 'profile-resolution.json')
 
-      - name: Publish LabVIEW profile advisory summary
+      - name: Publish LabVIEW target preset advisory summary
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $resolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
           if (-not (Test-Path -LiteralPath $resolutionPath -PathType Leaf)) {
-            throw "Profile resolution output missing: $resolutionPath"
+            throw "Target preset resolution output missing: $resolutionPath"
           }
 
           $resolution = Get-Content -LiteralPath $resolutionPath -Raw | ConvertFrom-Json
@@ -499,19 +499,19 @@ jobs:
 
           if ($comparison -eq 'mismatch') {
             if ([string]::IsNullOrWhiteSpace($message)) {
-              $message = "Selected profile '$profileId' differs from consumer target. Consumer remains authoritative."
+              $message = "Selected target preset '$profileId' differs from source project target. Source project remains authoritative."
             }
-            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $message)
+            Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $message)
           }
 
           @(
-            '## LabVIEW Profile Advisory'
+            '## LabVIEW Target Preset Advisory'
             ''
-            ('- Selected profile: `{0}`' -f $profileId)
+            ('- Selected target preset: `{0}`' -f $profileId)
             ('- Comparison result: `{0}`' -f $comparison)
-            ('- Profile expected VIPB target: `{0}`' -f $profileTarget)
-            ('- Consumer expected VIPB target: `{0}`' -f $consumerTarget)
-            '- Consumer remains authoritative for VIPB target enforcement.'
+            ('- Target preset expected VIPB target: `{0}`' -f $profileTarget)
+            ('- Source project expected VIPB target: `{0}`' -f $consumerTarget)
+            '- Source project remains authoritative for VIPB target enforcement.'
             '- Artifact: `docker-contract-labview-profile-resolution-${{ github.run_id }}`'
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
@@ -535,25 +535,25 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - id: labview-version
-        name: Resolve LabVIEW version from consumer repo
+        name: Resolve LabVIEW version from source project repo
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -563,7 +563,7 @@ jobs:
           $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
           "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
+          Write-Host ("Resolved LabVIEW version from source project .lvversion: {0}" -f $lvInfo.Raw)
 
       - name: Download release notes artifact
         uses: actions/download-artifact@v4
@@ -571,7 +571,7 @@ jobs:
           name: docker-contract-release-notes-${{ github.run_id }}
           path: ${{ runner.temp }}/release-notes-prepared
 
-      - name: Download LabVIEW profile resolution artifact
+      - name: Download LabVIEW target preset resolution artifact
         uses: actions/download-artifact@v4
         with:
           name: docker-contract-labview-profile-resolution-${{ github.run_id }}
@@ -596,16 +596,16 @@ jobs:
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
           $profileResolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
           if (-not (Test-Path -LiteralPath $profileResolutionPath -PathType Leaf)) {
-            throw "LabVIEW profile resolution file not found: $profileResolutionPath"
+            throw "LabVIEW target preset resolution file not found: $profileResolutionPath"
           }
           $profileResolution = Get-Content -LiteralPath $profileResolutionPath -Raw | ConvertFrom-Json
           $comparison = [string]$profileResolution.comparison_result
           if ($comparison -eq 'mismatch') {
             $warningMessage = [string]$profileResolution.warning_message
             if ([string]::IsNullOrWhiteSpace($warningMessage)) {
-              $warningMessage = 'Selected LabVIEW profile differs from consumer target. Consumer remains authoritative.'
+              $warningMessage = 'Selected LabVIEW target preset differs from source project target. Source project remains authoritative.'
             }
-            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $warningMessage)
+            Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $warningMessage)
           }
 
           $overlayData = $null
@@ -861,22 +861,22 @@ jobs:
       - name: Checkout skill repository
         uses: actions/checkout@v4
 
-      - name: Checkout consumer repository
+      - name: Checkout source project repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.CONSUMER_REPO }}
           ref: ${{ env.CONSUMER_REF }}
           path: consumer
 
-      - name: Verify checked out consumer SHA
+      - name: Verify checked out source project SHA
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $actualSha = (git -C consumer rev-parse HEAD).Trim()
           if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
-            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
-          Write-Host "Consumer SHA verified: $actualSha"
+          Write-Host "Source project SHA verified: $actualSha"
 
       - name: Validate self-hosted native LabVIEW prerequisites
         shell: pwsh
@@ -893,7 +893,7 @@ jobs:
           foreach ($relativePath in $requiredFiles) {
             $fullPath = Join-Path $consumerRoot $relativePath
             if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-              throw "Missing required consumer asset '$fullPath'."
+              throw "Missing required source project asset '$fullPath'."
             }
           }
           if (-not (Get-Command g-cli -ErrorAction SilentlyContinue)) {
@@ -901,7 +901,7 @@ jobs:
           }
 
       - id: labview-version
-        name: Resolve LabVIEW version from consumer repo
+        name: Resolve LabVIEW version from source project repo
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -911,7 +911,7 @@ jobs:
           $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
           "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
+          Write-Host ("Resolved LabVIEW version from source project .lvversion: {0}" -f $lvInfo.Raw)
 
       - name: Bootstrap worktree guard context
         shell: pwsh
@@ -1094,3 +1094,4 @@ jobs:
           name: docker-contract-vip-package-self-hosted-${{ github.run_id }}
           path: ${{ steps.locate-vip.outputs.vip_file_path }}
           if-no-files-found: error
+

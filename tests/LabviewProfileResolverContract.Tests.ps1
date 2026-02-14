@@ -34,7 +34,7 @@ Describe 'LabVIEW profile resolver contract' {
         $script:scriptContent | Should -Match '\$SupportedBitness'
         $script:scriptContent | Should -Match '\$OutputPath'
         $script:scriptContent | Should -Match 'comparison_result'
-        $script:scriptContent | Should -Match '::warning title=LabVIEW profile advisory mismatch::'
+        $script:scriptContent | Should -Match '::warning title=LabVIEW target preset advisory mismatch::'
     }
 
     It 'resolves default profile with match classification when consumer lvversion matches' {
@@ -91,7 +91,7 @@ Describe 'LabVIEW profile resolver contract' {
             $resolution = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
             [string]$resolution.comparison_result | Should -Be 'mismatch'
             [bool]$resolution.warning_required | Should -BeTrue
-            [string]$resolution.warning_message | Should -Match 'Consumer remains authoritative'
+            [string]$resolution.warning_message | Should -Match 'Source project remains authoritative'
             [string]$resolution.profile.expected_vipb_target | Should -Be '26.0 (64-bit)'
             [string]$resolution.consumer.expected_vipb_target | Should -Be '25.0 (64-bit)'
         }

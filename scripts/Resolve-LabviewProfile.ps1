@@ -185,7 +185,7 @@ try {
         $ProfileId.Trim()
     }
     if ([string]::IsNullOrWhiteSpace($selectedProfileId)) {
-        throw 'Selected profile id is empty.'
+        throw 'Selected target preset id is empty.'
     }
 
     $selectedProfiles = @($profiles | Where-Object {
@@ -199,42 +199,42 @@ try {
         $knownIds = @($profiles | ForEach-Object {
             [string](Get-OptionalPropertyValue -Object $_ -PropertyName 'id' -DefaultValue '')
         } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        throw "Profile '$selectedProfileId' not found. Known profiles: $($knownIds -join ', ')."
+        throw "Target preset '$selectedProfileId' not found. Known target presets: $($knownIds -join ', ')."
     }
     $selectedProfile = $selectedProfiles[0]
 
     $selectedProfileFolderName = [string](Get-OptionalPropertyValue -Object $selectedProfile -PropertyName 'id' -DefaultValue '')
     if ([string]::IsNullOrWhiteSpace($selectedProfileFolderName)) {
-        throw 'Selected profile entry is missing required field: id.'
+        throw 'Selected target preset entry is missing required field: id.'
     }
 
     $profileDirectory = Join-Path -Path $resolvedProfilesRoot -ChildPath $selectedProfileFolderName
     if (-not (Test-Path -LiteralPath $profileDirectory -PathType Container)) {
-        throw "Profile directory not found: $profileDirectory"
+        throw "Target preset directory not found: $profileDirectory"
     }
 
     $profileLvversionPath = Join-Path -Path $profileDirectory -ChildPath '.lvversion'
-    $profileLvversion = Resolve-LvversionInfo -Path $profileLvversionPath -ContextLabel "Profile '$selectedProfileFolderName'"
+    $profileLvversion = Resolve-LvversionInfo -Path $profileLvversionPath -ContextLabel "Target preset '$selectedProfileFolderName'"
 
     $manifestLvversion = [string](Get-OptionalPropertyValue -Object $selectedProfile -PropertyName 'lvversion' -DefaultValue '')
     if ([string]::IsNullOrWhiteSpace($manifestLvversion)) {
-        throw "Profile '$selectedProfileFolderName' is missing required manifest field 'lvversion'."
+        throw "Target preset '$selectedProfileFolderName' is missing required manifest field 'lvversion'."
     }
     if (-not [string]::Equals($manifestLvversion, [string]$profileLvversion.raw, [System.StringComparison]::Ordinal)) {
         throw (
-            "Profile '$selectedProfileFolderName' manifest lvversion '$manifestLvversion' does not match profile .lvversion '$($profileLvversion.raw)'."
+            "Target preset '$selectedProfileFolderName' manifest lvversion '$manifestLvversion' does not match target preset .lvversion '$($profileLvversion.raw)'."
         )
     }
 
     $overlayPath = Join-Path -Path $profileDirectory -ChildPath 'vipb-display-info.overlay.json'
     if (-not (Test-Path -LiteralPath $overlayPath -PathType Leaf)) {
-        throw "Profile '$selectedProfileFolderName' overlay file not found: $overlayPath"
+        throw "Target preset '$selectedProfileFolderName' overlay file not found: $overlayPath"
     }
     $overlayRaw = Get-Content -LiteralPath $overlayPath -Raw -ErrorAction Stop
     try {
         $overlayData = $overlayRaw | ConvertFrom-Json -ErrorAction Stop
     } catch {
-        throw "Profile '$selectedProfileFolderName' overlay JSON is invalid: $overlayPath"
+        throw "Target preset '$selectedProfileFolderName' overlay JSON is invalid: $overlayPath"
     }
 
     $resolvedConsumerRepoRoot = Resolve-FullPath -Path $ConsumerRepoRoot
@@ -243,7 +243,7 @@ try {
     }
 
     $consumerLvversionPath = Join-Path -Path $resolvedConsumerRepoRoot -ChildPath '.lvversion'
-    $consumerLvversion = Resolve-LvversionInfo -Path $consumerLvversionPath -ContextLabel 'Consumer'
+    $consumerLvversion = Resolve-LvversionInfo -Path $consumerLvversionPath -ContextLabel 'Source project'
 
     $profileExpectedTarget = Get-ExpectedVipbTarget -NumericVersion ([string]$profileLvversion.numeric) -Bitness $SupportedBitness
     $consumerExpectedTarget = Get-ExpectedVipbTarget -NumericVersion ([string]$consumerLvversion.numeric) -Bitness $SupportedBitness
@@ -256,7 +256,7 @@ try {
     }
 
     $warningMessage = if ($comparisonResult -eq 'mismatch') {
-        "Selected profile '$selectedProfileId' targets '$profileExpectedTarget' while consumer .lvversion targets '$consumerExpectedTarget'. Consumer remains authoritative."
+        "Selected target preset '$selectedProfileId' targets '$profileExpectedTarget' while source project .lvversion targets '$consumerExpectedTarget'. Source project remains authoritative."
     } else {
         ''
     }
@@ -309,10 +309,10 @@ try {
     Write-ResolutionJson -Path $resolvedOutputPath -Payload $resolution
 
     if ($comparisonResult -eq 'mismatch') {
-        Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $warningMessage)
+        Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $warningMessage)
     }
-    Write-Host ("LabVIEW profile resolution written: {0}" -f $resolvedOutputPath)
-    Write-Host ("Selected profile: {0}" -f $selectedProfileId)
+    Write-Host ("LabVIEW target preset resolution written: {0}" -f $resolvedOutputPath)
+    Write-Host ("Selected target preset: {0}" -f $selectedProfileId)
     Write-Host ("Comparison result: {0}" -f $comparisonResult)
 }
 catch {

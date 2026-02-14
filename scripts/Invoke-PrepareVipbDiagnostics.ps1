@@ -464,9 +464,9 @@ try {
             $advisoryMessage = if (-not [string]::IsNullOrWhiteSpace($warningMessage)) {
                 $warningMessage
             } else {
-                "Selected profile '$($profileAdvisory.profile_id)' differs from consumer target. Consumer remains authoritative."
+                "Selected target preset '$($profileAdvisory.profile_id)' differs from source project target. Source project remains authoritative."
             }
-            Write-Host ("::warning title=LabVIEW profile advisory mismatch::{0}" -f $advisoryMessage)
+            Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $advisoryMessage)
             Write-Log ("PROFILE_ADVISORY: {0}" -f $advisoryMessage)
         } else {
             Write-Log ("PROFILE_ADVISORY: comparison_result={0}" -f $comparisonResult)
@@ -717,20 +717,20 @@ finally {
     $diagnosticsSummary.Add(('- Observed VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target) -MaxLength 120)))
     $diagnosticsSummary.Add(('- Authority check: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.check_result) -MaxLength 20)))
     $diagnosticsSummary.Add('')
-    $diagnosticsSummary.Add('### Profile Advisory')
+    $diagnosticsSummary.Add('### Target Preset Advisory')
     $diagnosticsSummary.Add('')
-    $diagnosticsSummary.Add(('- Selected profile: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_id) -MaxLength 80)))
-    $diagnosticsSummary.Add(('- Profile .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_lvversion_raw) -MaxLength 60)))
-    $diagnosticsSummary.Add(('- Profile expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_expected_vipb_target) -MaxLength 120)))
-    $diagnosticsSummary.Add(('- Consumer .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_lvversion_raw) -MaxLength 60)))
-    $diagnosticsSummary.Add(('- Consumer expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_expected_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Selected target preset: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_id) -MaxLength 80)))
+    $diagnosticsSummary.Add(('- Target preset .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_lvversion_raw) -MaxLength 60)))
+    $diagnosticsSummary.Add(('- Target preset expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.profile_expected_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Source project .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_lvversion_raw) -MaxLength 60)))
+    $diagnosticsSummary.Add(('- Source project expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.consumer_expected_vipb_target) -MaxLength 120)))
     $diagnosticsSummary.Add(('- Comparison result: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.comparison_result) -MaxLength 20)))
     $warningEmittedText = if ($profileAdvisory.warning_emitted) { 'true' } else { 'false' }
     $diagnosticsSummary.Add(('- Warning emitted: `{0}`' -f $warningEmittedText))
     if (-not [string]::IsNullOrWhiteSpace([string]$profileAdvisory.warning_message)) {
         $diagnosticsSummary.Add(('- Advisory: `{0}`' -f (Format-MarkdownCell -Value ([string]$profileAdvisory.warning_message) -MaxLength 260)))
     }
-    $diagnosticsSummary.Add('- Consumer remains authoritative for VIPB target enforcement.')
+    $diagnosticsSummary.Add('- Source project remains authoritative for VIPB target enforcement.')
     $diagnosticsSummary.Add('')
     $diagnosticsSummary.Add('### Changed Fields Quick View')
     $diagnosticsSummary.Add('')
