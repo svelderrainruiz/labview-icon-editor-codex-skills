@@ -127,11 +127,18 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             $diagnostics = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics.json') -Raw | ConvertFrom-Json
             [string]$diagnostics.status | Should -BeIn @('updated', 'no_changes')
             [int]$diagnostics.diff.changed_field_count | Should -BeGreaterOrEqual 0
+            [int]$diagnostics.summary_format_version | Should -BeGreaterOrEqual 2
 
             $summary = Get-Content -LiteralPath (Join-Path $outputDir 'vipb-diagnostics-summary.md') -Raw
             $summary | Should -Match '## VIPB Diagnostics Suite'
+            $summary | Should -Match '### Changed Fields Quick View'
             $summary | Should -Match '### File Inventory'
-            $summary | Should -Match '\| File \| Exists \| Size \(bytes\) \| SHA256 \|'
+            $summary | Should -Match '\| Label \| Path \| Exists \| Size \(bytes\) \| SHA256 \|'
+            $summary | Should -Match 'prepared_vipb'
+            $summary | Should -Match 'vipb\.before\.xml'
+            $summary | Should -Match 'vipb\.after\.xml'
+            $summary | Should -Not -Match 'System\.Collections\.Specialized\.OrderedDictionary\.path'
+            $summary | Should -Not -Match '(?m)^## VIPB Metadata Delta\s*$'
             $summary | Should -Match '### Field Delta'
         }
         finally {

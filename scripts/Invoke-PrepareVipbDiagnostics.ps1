@@ -114,6 +114,144 @@ function Write-JsonFile {
     $Value | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [AllowNull()]
+        [object]$Object,
+        [Parameter(Mandatory = $true)]
+        [string]$PropertyName,
+        [AllowNull()]
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($PropertyName)) {
+            return $Object[$PropertyName]
+        }
+
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
+function Format-MarkdownCell {
+    param(
+        [AllowNull()]
+        [string]$Value,
+        [int]$MaxLength = 180
+    )
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    $normalized = $Value -replace "`r`n", "`n" -replace "`r", "`n"
+    $normalized = $normalized.Replace('|', '\|')
+    $normalized = $normalized -replace "`n", '<br/>'
+    $normalized = $normalized.Replace('`', '\`')
+
+    if ($normalized.Length -gt $MaxLength) {
+        return $normalized.Substring(0, $MaxLength - 3) + '...'
+    }
+
+    return $normalized
+}
+
+function Get-DisplayPath {
+    param(
+        [AllowNull()]
+        [string]$Path,
+        [AllowNull()]
+        [string]$BasePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+
+    $resolvedPath = Resolve-FullPath -Path $Path
+    if ([string]::IsNullOrWhiteSpace($BasePath)) {
+        return $resolvedPath
+    }
+
+    $resolvedBasePath = Resolve-FullPath -Path $BasePath
+    $relativePath = [System.IO.Path]::GetRelativePath($resolvedBasePath, $resolvedPath)
+    $outsideBase = (
+        $relativePath -eq '..' -or
+        $relativePath.StartsWith('..' + [IO.Path]::DirectorySeparatorChar) -or
+        $relativePath.StartsWith('..' + [IO.Path]::AltDirectorySeparatorChar)
+    )
+    if (-not $outsideBase) {
+        return $relativePath.Replace('\', '/')
+    }
+
+    return $resolvedPath
+}
+
+function New-InventoryEntry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [AllowNull()]
+        [object]$Info,
+        [AllowNull()]
+        [string]$BasePath
+    )
+
+    $rawPath = [string](Get-OptionalPropertyValue -Object $Info -PropertyName 'path' -DefaultValue '')
+    $exists = [bool](Get-OptionalPropertyValue -Object $Info -PropertyName 'exists' -DefaultValue $false)
+    $sha = [string](Get-OptionalPropertyValue -Object $Info -PropertyName 'sha256' -DefaultValue '')
+    $size = Get-OptionalPropertyValue -Object $Info -PropertyName 'size_bytes' -DefaultValue $null
+    $displayPath = Get-DisplayPath -Path $rawPath -BasePath $BasePath
+
+    return [pscustomobject]@{
+        label = $Label
+        path = $displayPath
+        exists = $exists
+        size_bytes = $size
+        sha256 = $sha
+    }
+}
+
+function Remove-MarkdownHeading {
+    param(
+        [AllowNull()]
+        [string]$Markdown,
+        [string]$Heading = '## VIPB Metadata Delta'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Markdown)) {
+        return ''
+    }
+
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($line in ($Markdown -split "`r?`n")) {
+        $lines.Add($line)
+    }
+
+    while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
+        $lines.RemoveAt(0)
+    }
+    if ($lines.Count -gt 0 -and $lines[0].Trim() -eq $Heading) {
+        $lines.RemoveAt(0)
+    }
+    while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
+        $lines.RemoveAt(0)
+    }
+
+    return ($lines -join [Environment]::NewLine).TrimEnd()
+}
+
 $startedUtc = (Get-Date).ToUniversalTime()
 $resolvedOutputDirectory = Resolve-FullPath -Path $OutputDirectory
 Ensure-Directory -Path $resolvedOutputDirectory
@@ -295,6 +433,7 @@ finally {
     $statusInfo = Get-FileSnapshotInfo -Path $paths.status_path
 
     $diagnostics = [ordered]@{
+        summary_format_version = 2
         status = $status
         started_utc = $startedUtc.ToString('o')
         completed_utc = $completedUtc.ToString('o')
@@ -348,6 +487,29 @@ finally {
 
     Write-JsonFile -Path $paths.diagnostics_path -Value $diagnostics -Depth 12
 
+    $workspaceRoot = if (
+        -not [string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE) -and
+        (Test-Path -LiteralPath $env:GITHUB_WORKSPACE -PathType Container)
+    ) {
+        Resolve-FullPath -Path $env:GITHUB_WORKSPACE
+    }
+    else {
+        Resolve-FullPath -Path (Join-Path $PSScriptRoot '..')
+    }
+
+    $inventoryEntries = @(
+        (New-InventoryEntry -Label 'prepared_vipb' -Info $preparedVipbInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'vipb_before' -Info $beforeSnapshotInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'vipb_after' -Info $afterSnapshotInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'diff_json' -Info $diffInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'diff_summary_markdown' -Info $diffSummaryInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'diagnostics_json' -Info (Get-FileSnapshotInfo -Path $paths.diagnostics_path) -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'status_json' -Info $statusInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'error_json' -Info $errorInfo -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'log_file' -Info (Get-FileSnapshotInfo -Path $paths.log_path) -BasePath $workspaceRoot),
+        (New-InventoryEntry -Label 'display_information_input' -Info $displayInfoInput -BasePath $workspaceRoot)
+    )
+
     $diagnosticsSummary = New-Object 'System.Collections.Generic.List[string]'
     $diagnosticsSummary.Add('## VIPB Diagnostics Suite')
     $diagnosticsSummary.Add('')
@@ -357,42 +519,54 @@ finally {
     $diagnosticsSummary.Add(('- Source: `{0}` @ `{1}`' -f $SourceRepository, $SourceSha))
     $diagnosticsSummary.Add(('- Workflow run: `{0}` attempt `{1}`' -f $BuildRunId, $BuildRunAttempt))
     $diagnosticsSummary.Add('')
+    $diagnosticsSummary.Add('### Changed Fields Quick View')
+    $diagnosticsSummary.Add('')
+    if ($changedFields.Count -gt 0) {
+        foreach ($field in $changedFields) {
+            $fieldText = Format-MarkdownCell -Value ([string]$field) -MaxLength 120
+            $diagnosticsSummary.Add(('- `{0}`' -f $fieldText))
+        }
+    }
+    else {
+        $diagnosticsSummary.Add('- none')
+    }
+    $diagnosticsSummary.Add('')
     $diagnosticsSummary.Add('### File Inventory')
     $diagnosticsSummary.Add('')
-    $diagnosticsSummary.Add('| File | Exists | Size (bytes) | SHA256 |')
-    $diagnosticsSummary.Add('| --- | --- | --- | --- |')
-    foreach ($entry in @(
-        $preparedVipbInfo,
-        $beforeSnapshotInfo,
-        $afterSnapshotInfo,
-        $diffInfo,
-        $diffSummaryInfo,
-        (Get-FileSnapshotInfo -Path $paths.diagnostics_path),
-        (Get-FileSnapshotInfo -Path $paths.status_path),
-        $errorInfo,
-        (Get-FileSnapshotInfo -Path $paths.log_path),
-        $displayInfoInput
-    )) {
+    $diagnosticsSummary.Add('| Label | Path | Exists | Size (bytes) | SHA256 |')
+    $diagnosticsSummary.Add('| --- | --- | --- | --- | --- |')
+    foreach ($entry in $inventoryEntries) {
+        $labelText = Format-MarkdownCell -Value ([string]$entry.label) -MaxLength 80
+        $pathText = Format-MarkdownCell -Value ([string]$entry.path) -MaxLength 260
         $existsText = if ($entry.exists) { 'yes' } else { 'no' }
-        $sizeText = if ($entry.Contains('size_bytes')) { [string]$entry.size_bytes } else { '' }
-        $shaText = if ($entry.Contains('sha256')) { [string]$entry.sha256 } else { '' }
-        $diagnosticsSummary.Add("| `$($entry.path)` | $existsText | $sizeText | $shaText |")
+        $sizeText = if ($null -ne $entry.size_bytes) { [string]$entry.size_bytes } else { '' }
+        $shaText = if (-not [string]::IsNullOrWhiteSpace([string]$entry.sha256)) {
+            Format-MarkdownCell -Value ([string]$entry.sha256) -MaxLength 80
+        }
+        else {
+            ''
+        }
+        $diagnosticsSummary.Add("| $labelText | $pathText | $existsText | $sizeText | $shaText |")
     }
 
     if (Test-Path -LiteralPath $paths.diff_summary_path -PathType Leaf) {
-        $diagnosticsSummary.Add('')
-        $diagnosticsSummary.Add('### Field Delta')
-        $diagnosticsSummary.Add('')
-        $diagnosticsSummary.Add((Get-Content -LiteralPath $paths.diff_summary_path -Raw))
+        $fieldDeltaContent = Remove-MarkdownHeading -Markdown (Get-Content -LiteralPath $paths.diff_summary_path -Raw)
+        if (-not [string]::IsNullOrWhiteSpace($fieldDeltaContent)) {
+            $diagnosticsSummary.Add('')
+            $diagnosticsSummary.Add('### Field Delta')
+            $diagnosticsSummary.Add('')
+            $diagnosticsSummary.Add($fieldDeltaContent)
+        }
     }
 
     if ($status -eq 'failed' -and $null -ne $errorPayload) {
+        $errorPayloadPath = Get-DisplayPath -Path $paths.error_path -BasePath $workspaceRoot
         $diagnosticsSummary.Add('')
         $diagnosticsSummary.Add('### Failure')
         $diagnosticsSummary.Add('')
         $diagnosticsSummary.Add(('- Error type: `{0}`' -f $errorPayload.type))
-        $diagnosticsSummary.Add(('- Message: `{0}`' -f $errorPayload.message))
-        $diagnosticsSummary.Add(('- Error payload: `{0}`' -f $paths.error_path))
+        $diagnosticsSummary.Add(('- Message: `{0}`' -f (Format-MarkdownCell -Value $errorPayload.message -MaxLength 260)))
+        $diagnosticsSummary.Add(('- Error payload: `{0}`' -f (Format-MarkdownCell -Value $errorPayloadPath -MaxLength 260)))
     }
 
     $diagnosticsSummary -join [Environment]::NewLine | Set-Content -LiteralPath $paths.diagnostics_summary_path -Encoding UTF8
