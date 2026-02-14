@@ -23,6 +23,14 @@ on:
         required: true
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
+      windows_build_lane:
+        description: Windows PPL producer lane. Use linux-container when Windows Docker is unavailable.
+        required: true
+        default: linux-container
+        type: choice
+        options:
+          - linux-container
+          - windows-container
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
         required: false
@@ -98,6 +106,11 @@ on:
         required: false
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
+      windows_build_lane:
+        description: Windows PPL producer lane. Use linux-container when Windows Docker is unavailable.
+        required: false
+        default: linux-container
+        type: string
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
         required: false
@@ -167,7 +180,7 @@ permissions:
 
 jobs:
   build-ppl-windows:
-    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    runs-on: ${{ inputs.windows_build_lane == 'windows-container' && fromJSON('["self-hosted","windows","self-hosted-windows-lv"]') || 'ubuntu-latest' }}
     outputs:
       ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
       artifact_name: ${{ steps.bundle.outputs.artifact_name }}
@@ -182,10 +195,22 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
+      - name: Build NI Linux image locally when needed
+        if: ${{ inputs.windows_build_lane == 'linux-container' }}
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
+
       - name: Build Windows PPL in NI Windows container
         shell: pwsh
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
         run: |
           $ErrorActionPreference = 'Stop'
           $windowsPplOutputRelativePath = '${{ inputs.windows_ppl_output_path }}'
@@ -203,7 +228,7 @@ jobs:
             Write-Host $customCommand
             Invoke-Expression $customCommand
           }
-          else {
+          elseif ('${{ inputs.windows_build_lane }}' -eq 'windows-container') {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:C:\workspace" `
@@ -223,6 +248,28 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:WINDOWS_LABVIEW_IMAGE" `
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+          }
+          else {
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:/workspace" `
+              -w /workspace `
+              -e "LVIE_REPO_ROOT=/workspace" `
+              -e "WORKSPACE_ROOT=/workspace" `
+              -e "REPO_ROOT=/workspace" `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test/Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$($windowsPplOutputRelativePath -replace '\\', '/')" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              "$env:LINUX_LABVIEW_IMAGE" `
+              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
           }
 
           if ($LASTEXITCODE -ne 0) {
@@ -283,6 +330,16 @@ jobs:
           repository: ${{ inputs.consumer_repo }}
           ref: ${{ inputs.consumer_ref }}
           path: consumer
+
+      - name: Build NI Linux image locally when needed
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
 
       - name: Build Linux PPL in NI Linux container
         shell: pwsh
@@ -388,6 +445,16 @@ jobs:
           repository: ${{ inputs.consumer_repo }}
           ref: ${{ inputs.consumer_ref }}
           path: consumer
+
+      - name: Build NI Linux image locally when needed
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
 
       - name: Download Windows PPL handoff artifact
         uses: actions/download-artifact@v4
