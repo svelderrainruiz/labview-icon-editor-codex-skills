@@ -1296,7 +1296,10 @@ jobs:
           if-no-files-found: error
 
   install-vip-x86-self-hosted:
-    runs-on: [self-hosted, windows, ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}]
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
     needs: [build-vip-self-hosted, resolve-labview-profile]
     steps:
       - name: Checkout skill repository

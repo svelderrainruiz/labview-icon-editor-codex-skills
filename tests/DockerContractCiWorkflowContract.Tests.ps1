@@ -233,7 +233,7 @@ Describe 'Docker contract CI workflow contract' {
 
     It 'runs post-package VIPM install smoke on dynamic x86 runner label and uploads diagnostics artifact' {
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:'
-        $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}\]'
+        $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}))'
         $script:workflowContent | Should -Match 'Download self-hosted VI Package artifact'
         $script:workflowContent | Should -Match 'docker-contract-vip-package-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Resolve VI Package artifact path'
