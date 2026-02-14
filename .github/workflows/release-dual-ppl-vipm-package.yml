@@ -1,0 +1,361 @@
+name: release-dual-ppl-vipm-package
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer_repo:
+        description: Consumer repository that owns the LabVIEW project.
+        required: true
+        default: svelderrainruiz/labview-icon-editor
+        type: string
+      consumer_ref:
+        description: Consumer ref (branch/tag/SHA) to build/package.
+        required: true
+        default: main
+        type: string
+      windows_labview_image:
+        description: Windows NI LabVIEW Docker image used to build Windows PPL.
+        required: true
+        default: nationalinstruments/labview:2026q1-windows
+        type: string
+      linux_labview_image:
+        description: Linux NI LabVIEW Docker image used to build Linux PPL and VI package.
+        required: true
+        default: nationalinstruments/labview:2026q1-linux-pwsh
+        type: string
+      windows_build_command:
+        description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
+        required: false
+        default: ''
+        type: string
+      linux_build_command:
+        description: Optional custom command for Linux PPL build. Leave blank to use built-in container parity command.
+        required: false
+        default: ''
+        type: string
+      windows_ppl_output_path:
+        description: Relative path to the built PPL produced by Windows build.
+        required: true
+        default: consumer/resource/plugins/lv_icon.windows.lvlibp
+        type: string
+      linux_ppl_output_path:
+        description: Relative path to the built PPL produced by Linux build.
+        required: true
+        default: consumer/resource/plugins/lv_icon.linux.lvlibp
+        type: string
+      linux_consume_windows_ppl_path:
+        description: Relative path where Linux packaging lane installs Windows-built PPL.
+        required: true
+        default: consumer/resource/plugins/lv_icon.windows.lvlibp
+        type: string
+      linux_consume_linux_ppl_path:
+        description: Relative path where Linux packaging lane installs Linux-built PPL.
+        required: true
+        default: consumer/resource/plugins/lv_icon.linux.lvlibp
+        type: string
+      vipm_project_path:
+        description: Relative path to .vipb consumed by vipm build.
+        required: true
+        default: consumer/Tooling/deployment/NI Icon editor.vipb
+        type: string
+      labview_version:
+        description: LabVIEW version (YYYY) encoded in handoff manifests.
+        required: true
+        default: '2026'
+        type: string
+      bitness:
+        description: Target bitness for bundle compatibility checks.
+        required: true
+        default: '64'
+        type: choice
+        options:
+          - '32'
+          - '64'
+      vipm_community_edition:
+        description: Run vipm activate before package build.
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-ppl-windows:
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    outputs:
+      ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
+      artifact_name: ${{ steps.bundle.outputs.artifact_name }}
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.consumer_repo }}
+          ref: ${{ inputs.consumer_ref }}
+          path: consumer
+
+      - name: Build Windows PPL in NI Windows container
+        shell: pwsh
+        env:
+          WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.windows_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host "Executing custom windows_build_command:"
+            Write-Host $customCommand
+            Invoke-Expression $customCommand
+          }
+          else {
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:C:\workspace" `
+              -e LVIE_REPO_ROOT=C:\workspace `
+              -e WORKSPACE_ROOT=C:\workspace `
+              -e REPO_ROOT=C:\workspace `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test\Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.windows.lvlibp" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              "$env:WINDOWS_LABVIEW_IMAGE" `
+              powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+      - id: bundle
+        name: Create Windows PPL handoff bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.windows_ppl_output_path }}'
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Windows PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion '${{ inputs.labview_version }}' `
+            -Bitness '${{ inputs.bitness }}' `
+            -WindowsImage '${{ inputs.windows_labview_image }}' `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+          $manifestPath = Join-Path $bundleDir 'ppl-manifest.json'
+          $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+          $artifactName = "ppl-bundle-windows-$env:GITHUB_RUN_ID"
+
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ppl_sha256=$($manifest.ppl_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload Windows PPL handoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+          if-no-files-found: error
+
+  build-ppl-linux:
+    runs-on: ubuntu-latest
+    outputs:
+      ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
+      artifact_name: ${{ steps.bundle.outputs.artifact_name }}
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.consumer_repo }}
+          ref: ${{ inputs.consumer_ref }}
+          path: consumer
+
+      - name: Build Linux PPL in NI Linux container
+        shell: pwsh
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.linux_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host "Executing custom linux_build_command:"
+            Write-Host $customCommand
+            Invoke-Expression $customCommand
+          }
+          else {
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:/workspace" `
+              -w /workspace `
+              -e "LVIE_REPO_ROOT=/workspace" `
+              -e "WORKSPACE_ROOT=/workspace" `
+              -e "REPO_ROOT=/workspace" `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test/Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.linux.lvlibp" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              "$env:LINUX_LABVIEW_IMAGE" `
+              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Linux PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+      - id: bundle
+        name: Create Linux PPL handoff bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_ppl_output_path }}'
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Linux PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion '${{ inputs.labview_version }}' `
+            -Bitness '${{ inputs.bitness }}' `
+            -WindowsImage '${{ inputs.linux_labview_image }}' `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+          $manifestPath = Join-Path $bundleDir 'ppl-manifest.json'
+          $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+          $artifactName = "ppl-bundle-linux-$env:GITHUB_RUN_ID"
+
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ppl_sha256=$($manifest.ppl_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload Linux PPL handoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
+          if-no-files-found: error
+
+  package-vip-linux:
+    needs: [build-ppl-windows, build-ppl-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.consumer_repo }}
+          ref: ${{ inputs.consumer_ref }}
+          path: consumer
+
+      - name: Download Windows PPL handoff artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-ppl-windows.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+
+      - name: Download Linux PPL handoff artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-ppl-linux.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
+
+      - name: Verify and install Windows-built PPL for Linux packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          $targetPplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_consume_windows_ppl_path }}'
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
+            -BundleDirectory $bundleDir `
+            -OutputPplPath $targetPplPath `
+            -ExpectedLabVIEWVersion '${{ inputs.labview_version }}' `
+            -ExpectedBitness '${{ inputs.bitness }}' `
+            -ExpectedSha256 '${{ needs.build-ppl-windows.outputs.ppl_sha256 }}'
+
+      - name: Verify and install Linux-built PPL for Linux packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          $targetPplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_consume_linux_ppl_path }}'
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
+            -BundleDirectory $bundleDir `
+            -OutputPplPath $targetPplPath `
+            -ExpectedLabVIEWVersion '${{ inputs.labview_version }}' `
+            -ExpectedBitness '${{ inputs.bitness }}' `
+            -ExpectedSha256 '${{ needs.build-ppl-linux.outputs.ppl_sha256 }}'
+
+      - name: Build VI Package in NI Linux container using consumed PPLs
+        shell: bash
+        env:
+          VIPM_COMMUNITY_EDITION: ${{ inputs.vipm_community_edition }}
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+          VIPM_PROJECT_PATH: ${{ inputs.vipm_project_path }}
+        run: |
+          set -euo pipefail
+
+          vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
+
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/consumer:/workspace" \
+            -w /workspace \
+            -e VIPM_COMMUNITY_EDITION="$VIPM_COMMUNITY_EDITION" \
+            -e VIPM_PROJECT_PATH_IN_CONTAINER="$vipm_project_path_in_container" \
+            -e LINUX_LABVIEW_IMAGE="$LINUX_LABVIEW_IMAGE" \
+            "$LINUX_LABVIEW_IMAGE" \
+            bash -lc '
+              set -euo pipefail
+              if ! command -v vipm >/dev/null 2>&1; then
+                echo "vipm is not available on PATH inside Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
+
+              if [[ "$VIPM_COMMUNITY_EDITION" == "true" || "$VIPM_COMMUNITY_EDITION" == "1" || "$VIPM_COMMUNITY_EDITION" == "yes" || "$VIPM_COMMUNITY_EDITION" == "on" ]]; then
+                vipm activate
+              fi
+
+              vipm build "$VIPM_PROJECT_PATH_IN_CONTAINER"
+            '
