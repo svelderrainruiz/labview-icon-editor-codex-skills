@@ -92,11 +92,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $windowsPplOutputRelativePath = $env:WINDOWS_PPL_OUTPUT_PATH
-          if ($windowsPplOutputRelativePath.StartsWith('consumer/')) {
-            $windowsPplOutputRelativePath = $windowsPplOutputRelativePath.Substring('consumer/'.Length)
+          $windowsPplTargetRelativePath = $env:WINDOWS_PPL_OUTPUT_PATH
+          if ($windowsPplTargetRelativePath.StartsWith('consumer/')) {
+            $windowsPplTargetRelativePath = $windowsPplTargetRelativePath.Substring('consumer/'.Length)
           }
-          $windowsPplOutputRelativePath = $windowsPplOutputRelativePath -replace '/', '\'
+          $windowsPplTargetRelativePath = $windowsPplTargetRelativePath -replace '/', '\'
+          $windowsPplBuildRelativePath = 'resource\plugins\lv_icon.lvlibp'
 
           docker image inspect "$env:WINDOWS_LABVIEW_IMAGE" *> $null
           if ($LASTEXITCODE -ne 0) {
@@ -121,13 +122,28 @@ jobs:
             -e "CONTAINER_PARITY_BUILD_SPEC=true" `
             -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
             -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
-            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$windowsPplOutputRelativePath" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$windowsPplBuildRelativePath" `
             -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
             "$env:WINDOWS_LABVIEW_IMAGE" `
             powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
 
           if ($LASTEXITCODE -ne 0) {
             throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+          $builtPplPath = Join-Path $consumerWorkspace ($windowsPplBuildRelativePath -replace '\\', '/')
+          if (-not (Test-Path -LiteralPath $builtPplPath -PathType Leaf)) {
+            throw "Windows build output not found at '$builtPplPath'."
+          }
+
+          $targetPplPath = Join-Path $consumerWorkspace ($windowsPplTargetRelativePath -replace '\\', '/')
+          if (-not ($builtPplPath.Equals($targetPplPath, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $targetDirectory = Split-Path -Path $targetPplPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($targetDirectory) -and -not (Test-Path -LiteralPath $targetDirectory -PathType Container)) {
+              New-Item -Path $targetDirectory -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $builtPplPath -Destination $targetPplPath -Force
+            Write-Host "Copied Windows PPL build output to expected bundle path: $targetPplPath"
           }
 
       - name: Create Windows PPL bundle manifest
@@ -222,11 +238,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $linuxPplOutputRelativePath = $env:LINUX_PPL_OUTPUT_PATH
-          if ($linuxPplOutputRelativePath.StartsWith('consumer/')) {
-            $linuxPplOutputRelativePath = $linuxPplOutputRelativePath.Substring('consumer/'.Length)
+          $linuxPplTargetRelativePath = $env:LINUX_PPL_OUTPUT_PATH
+          if ($linuxPplTargetRelativePath.StartsWith('consumer/')) {
+            $linuxPplTargetRelativePath = $linuxPplTargetRelativePath.Substring('consumer/'.Length)
           }
-          $linuxPplOutputRelativePath = $linuxPplOutputRelativePath -replace '\\', '/'
+          $linuxPplTargetRelativePath = $linuxPplTargetRelativePath -replace '\\', '/'
+          $linuxPplBuildRelativePath = 'resource/plugins/lv_icon.lvlibp'
 
           $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
           $linuxContainerParityCommand = @'
@@ -268,7 +285,7 @@ jobs:
             -e "CONTAINER_PARITY_BUILD_SPEC=true" `
             -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
             -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
-            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplOutputRelativePath" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplBuildRelativePath" `
             -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
             -e "LABVIEW_COMMUNITY_EDITION=true" `
             "$env:LINUX_LABVIEW_IMAGE" `
@@ -276,6 +293,21 @@ jobs:
 
           if ($LASTEXITCODE -ne 0) {
             throw "Linux PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+          $builtPplPath = Join-Path $consumerWorkspace $linuxPplBuildRelativePath
+          if (-not (Test-Path -LiteralPath $builtPplPath -PathType Leaf)) {
+            throw "Linux build output not found at '$builtPplPath'."
+          }
+
+          $targetPplPath = Join-Path $consumerWorkspace $linuxPplTargetRelativePath
+          if (-not ($builtPplPath.Equals($targetPplPath, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $targetDirectory = Split-Path -Path $targetPplPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($targetDirectory) -and -not (Test-Path -LiteralPath $targetDirectory -PathType Container)) {
+              New-Item -Path $targetDirectory -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $builtPplPath -Destination $targetPplPath -Force
+            Write-Host "Copied Linux PPL build output to expected bundle path: $targetPplPath"
           }
 
       - name: Create Linux PPL bundle manifest
