@@ -46,6 +46,20 @@ function Test-CommandAvailable {
     return $null -ne (Get-Command -Name $Name -ErrorAction SilentlyContinue)
 }
 
+function Test-IsTrueLike {
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    return $Value.Trim().ToLowerInvariant() -in @('1', 'true', 'yes', 'on')
+}
+
 function Get-NormalizedLabVIEWYear {
     param(
         [Parameter(Mandatory)]
@@ -211,6 +225,45 @@ function Invoke-VipmCommand {
     }
 }
 
+function Invoke-VipmCommunityActivation {
+    param(
+        [Parameter(Mandatory)]
+        [int]$TimeoutSeconds
+    )
+
+    $enabled = Test-IsTrueLike -Value $env:VIPM_COMMUNITY_EDITION
+    if (-not $enabled) {
+        return [pscustomobject]@{
+            attempted = $false
+            enabled = $false
+            exit_code = $null
+            timed_out = $false
+            stderr_preview = $null
+        }
+    }
+
+    $execution = Invoke-VipmCommand -Arguments @('activate') -TimeoutSeconds $TimeoutSeconds
+    $stderrPreview = if ([string]::IsNullOrWhiteSpace($execution.StdErr)) { $null } else { (($execution.StdErr -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1) }
+
+    if ($execution.TimedOut) {
+        throw "VIPM activation timed out after $TimeoutSeconds second(s)."
+    }
+
+    if ($execution.ExitCode -ne 0) {
+        $candidate = @($execution.StdErr, $execution.StdOut) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+        $message = if ($candidate) { ($candidate -split "`r?`n" | Select-Object -First 1).Trim() } else { "vipm activate exited with code $($execution.ExitCode)." }
+        throw "VIPM activation failed: $message"
+    }
+
+    return [pscustomobject]@{
+        attempted = $true
+        enabled = $true
+        exit_code = $execution.ExitCode
+        timed_out = $execution.TimedOut
+        stderr_preview = $stderrPreview
+    }
+}
+
 function Get-ToolPlan {
     param(
         [Parameter(Mandatory)]
@@ -368,6 +421,8 @@ if (-not $SkipProcessWait.IsPresent) {
     Wait-ForIdleProcess -ProcessName @('vipm', 'labview') -TimeoutSeconds $WaitTimeoutSeconds -PollSeconds $WaitPollSeconds
 }
 
+$activation = Invoke-VipmCommunityActivation -TimeoutSeconds $CommandTimeoutSeconds
+
 $toolsToRun = if ($Tool -eq 'all') {
     @('about', 'version', 'search', 'list', 'build', 'install', 'uninstall')
 }
@@ -451,6 +506,11 @@ $payload = [pscustomobject]@{
     resolved_lvversion_path  = $resolvedVersion.LvversionPath
     resolved_labview_raw     = $resolvedVersion.RawValue
     resolved_bitness         = $Bitness
+    vipm_community_edition   = Test-IsTrueLike -Value $env:VIPM_COMMUNITY_EDITION
+    activation_attempted     = $activation.attempted
+    activation_exit_code     = $activation.exit_code
+    activation_timed_out     = $activation.timed_out
+    activation_stderr_preview = $activation.stderr_preview
     state_changing_requested = $stateChangingRequested
     run_count                = @($records).Count
     failure_count            = @($records | Where-Object { $_.exit_code -ne 0 }).Count

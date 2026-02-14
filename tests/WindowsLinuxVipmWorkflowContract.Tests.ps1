@@ -25,11 +25,13 @@ Describe 'Windows->Linux VIPM package workflow contract' {
         $script:workflowContent | Should -Match 'needs:\s*\[build-ppl-windows\]'
         $script:workflowContent | Should -Match 'consumer_repo:'
         $script:workflowContent | Should -Match 'consumer_ref:'
+        $script:workflowContent | Should -Match 'ppl_build_lane:'
     }
 
     It 'creates and uploads a PPL handoff bundle from Windows' {
         $script:workflowContent | Should -Match 'Checkout consumer repository'
         $script:workflowContent | Should -Match 'runlabview-windows\.ps1'
+        $script:workflowContent | Should -Match 'runlabview-linux\.sh'
         $script:workflowContent | Should -Match 'Create PPL handoff bundle'
         $script:workflowContent | Should -Match 'scripts/New-PplBundleManifest\.ps1'
         $script:workflowContent | Should -Match 'Upload PPL handoff artifact'

@@ -23,6 +23,14 @@ on:
         required: true
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
+      ppl_build_lane:
+        description: PPL producer lane. Use linux-container on hosts that cannot run Windows containers.
+        required: true
+        default: linux-container
+        type: choice
+        options:
+          - linux-container
+          - windows-container
       windows_build_command:
         description: Optional custom command executed on Windows runner. Leave blank to use built-in container parity command.
         required: false
@@ -67,7 +75,7 @@ permissions:
 
 jobs:
   build-ppl-windows:
-    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    runs-on: ${{ inputs.ppl_build_lane == 'windows-container' && fromJSON('["self-hosted","windows","self-hosted-windows-lv"]') || 'ubuntu-latest' }}
     outputs:
       ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
       artifact_name: ${{ steps.bundle.outputs.artifact_name }}
@@ -86,13 +94,19 @@ jobs:
         shell: pwsh
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
         run: |
           $ErrorActionPreference = 'Stop'
           $customCommand = @'
           ${{ inputs.windows_build_command }}
           '@.Trim()
 
-          if ([string]::IsNullOrWhiteSpace($customCommand)) {
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host "Executing custom windows_build_command:"
+            Write-Host $customCommand
+            Invoke-Expression $customCommand
+          }
+          elseif ('${{ inputs.ppl_build_lane }}' -eq 'windows-container') {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:C:\workspace" `
@@ -114,9 +128,26 @@ jobs:
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
           }
           else {
-            Write-Host "Executing custom windows_build_command:"
-            Write-Host $customCommand
-            Invoke-Expression $customCommand
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:/workspace" `
+              -w /workspace `
+              -e "LVIE_REPO_ROOT=/workspace" `
+              -e "WORKSPACE_ROOT=/workspace" `
+              -e "REPO_ROOT=/workspace" `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test/Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.lvlibp" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              "$env:LINUX_LABVIEW_IMAGE" `
+              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
           }
 
           if ($LASTEXITCODE -ne 0) {

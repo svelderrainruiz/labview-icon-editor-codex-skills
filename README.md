@@ -80,6 +80,7 @@ Installer contract:
 
 ### Dispatch inputs you must provide
 - `consumer_ref`: branch/tag/SHA to build/package.
+- `ppl_build_lane`: `linux-container` (recommended when host cannot run Docker Windows containers) or `windows-container`.
 
 ### Optional override inputs
 - `windows_build_command`: custom command for Windows PPL build. Leave blank to use built-in container parity command.
@@ -99,5 +100,6 @@ Installer contract:
 - `bitness`: `64`
 
 ### Notes
+- If your Windows host only supports Docker Linux containers, set `ppl_build_lane=linux-container` (default).
 - Linux stage fails fast if `vipm` is not available in the selected Linux image.
 - If `vipm_community_edition=true`, Linux stage runs `vipm activate` before `vipm build`.
