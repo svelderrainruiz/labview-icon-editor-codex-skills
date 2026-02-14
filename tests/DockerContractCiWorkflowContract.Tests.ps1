@@ -15,10 +15,10 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent = Get-Content -Path $script:workflowPath -Raw
     }
 
-    It 'defines CI Pipeline workflow name and trigger path' {
+    It 'defines CI Pipeline workflow name and unfiltered pull_request trigger' {
         $script:workflowContent | Should -Match 'name:\s*CI Pipeline'
-        $script:workflowContent | Should -Match '\.github/workflows/ci\.yml'
-        $script:workflowContent | Should -Match '''profiles/\*\*'''
+        $script:workflowContent | Should -Match 'pull_request:'
+        $script:workflowContent | Should -Not -Match 'pull_request:\s*[\s\S]*?paths:'
     }
 
     It 'supports reusable workflow_call with source project override inputs' {

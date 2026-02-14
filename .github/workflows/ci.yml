@@ -24,17 +24,6 @@ on:
         default: 'lv2026'
         type: string
   pull_request:
-    paths:
-      - 'tests/**'
-      - 'schemas/**'
-      - 'scripts/**'
-      - 'profiles/**'
-      - 'vipm-cli-machine/**'
-      - 'docker/**'
-      - 'docs/**'
-      - 'manifest.json'
-      - 'README.md'
-      - '.github/workflows/ci.yml'
   workflow_dispatch:
     inputs:
       labview_profile:
