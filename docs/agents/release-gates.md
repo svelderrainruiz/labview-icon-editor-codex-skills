@@ -68,7 +68,8 @@ Optional inputs:
   - failures are hard-gate failures, not warnings.
 - `run-lunit-smoke-lv2020x64` remains a strict gate:
   - LV2020 failure is blocking.
-  - a diagnostic-only LV2026 x64 control probe may run on failure to improve root-cause clarity, but it does not change gate outcome.
+  - a diagnostic-only LV2026 x64 control probe may run on comparable failures (`no_testcases` / `failed_testcases`) to improve root-cause clarity, but it does not change gate outcome.
+  - control probe is skipped when active LabVIEW processes are detected.
 
 ## Provenance policy
 Release notes must include CI and source-project provenance fields produced by `ci.yml` and `release-skill-layer`:

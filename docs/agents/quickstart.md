@@ -84,7 +84,8 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - LV2020 smoke command contract is run-only:
   - `g-cli --lv-ver 2020 --arch 64 lunit -- -r <report> <project.lvproj>`
   - no deterministic `g-cli ... lunit -- -h` preflight.
-- On LV2020 smoke failure, CI runs a diagnostic-only LV2026 x64 control probe and writes comparative results into `lunit-smoke.result.json` and the job summary.
+- On LV2020 smoke failure, CI may run a diagnostic-only LV2026 x64 control probe (for comparable outcomes like `no_testcases` / `failed_testcases`) and writes comparative results into `lunit-smoke.result.json` and the job summary.
+- Control probe is skipped when active LabVIEW processes are detected to avoid duplicate-instance churn during manual triage.
 - LV2020 remains strict: a failed LV2020 outcome blocks downstream self-hosted jobs even if the LV2026 control probe passes.
 - Triage order for LV2020 smoke:
   1. `lunit-smoke.result.json`

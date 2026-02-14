@@ -81,7 +81,9 @@ Installer contract:
   - `run-lunit-smoke-lv2020x64` enforces required `64-bit` coverage only.
   - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
   - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for LV2020 x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
-  - when LV2020 smoke fails, the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary; LV2020 failure still hard-fails the gate.
+  - when LV2020 smoke fails with comparable validation outcomes (`no_testcases` or `failed_testcases`), the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary.
+  - the LV2026 control probe is skipped if active LabVIEW processes are detected to avoid spawning duplicate instances during triage.
+  - LV2020 failure still hard-fails the gate regardless of control-probe outcome.
   - all self-hosted jobs enforce source project remote hygiene via `scripts/Assert-SourceProjectRemotes.ps1`:
     - configure `upstream` to `https://github.com/${{ env.CONSUMER_REPO }}.git`
     - run non-interactive `git ls-remote upstream`

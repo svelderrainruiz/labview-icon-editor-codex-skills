@@ -243,6 +243,7 @@ function Invoke-Lv2026ControlProbe {
         reason = ''
         target_labview_version = '2026'
         required_bitness = '64'
+        active_labview_processes = @()
         workspace_root = ''
         report_path = $ReportPath
         command = ''
@@ -419,6 +420,7 @@ $result = [ordered]@{
         reason = 'not_triggered'
         target_labview_version = '2026'
         required_bitness = '64'
+        active_labview_processes = @()
         workspace_root = ''
         report_path = ''
         command = ''
@@ -626,19 +628,51 @@ catch {
     Write-Log ("ERROR: {0}" -f $errorMessage)
 
     if ($runPhaseStarted -and -not [string]::IsNullOrWhiteSpace($gcliCommandPath) -and -not [string]::IsNullOrWhiteSpace($resolvedSourceProjectRoot) -and -not [string]::IsNullOrWhiteSpace([string]$result.source.project_relative_path)) {
-        Write-Log 'LV2020 run/report path failed; running diagnostic-only LV2026 control probe.'
-        $result.control_probe = Invoke-Lv2026ControlProbe `
-            -GcliCommandPath $gcliCommandPath `
-            -SourceProjectRoot $resolvedSourceProjectRoot `
-            -ProjectRelativePath ([string]$result.source.project_relative_path) `
-            -SourceLvversionRaw $sourceLvversionRaw `
-            -ReportPath $paths.control_report_path
+        $primaryValidationOutcome = [string]$result.report.validation_outcome
+        if ([string]::IsNullOrWhiteSpace($primaryValidationOutcome)) {
+            $primaryValidationOutcome = 'unknown'
+        }
 
-        if ([string]$result.control_probe.status -eq 'passed') {
-            Write-Log 'LV2026 control probe passed. LV2020 failure is likely version-specific compatibility/discovery.'
+        $eligibleControlOutcomes = @('no_testcases', 'failed_testcases')
+        if ($eligibleControlOutcomes -notcontains $primaryValidationOutcome) {
+            $result.control_probe.reason = "skipped_for_primary_outcome_$primaryValidationOutcome"
+            Write-Log ("Skipping LV2026 control probe because LV2020 validation outcome '{0}' is not in eligible set: {1}." -f $primaryValidationOutcome, ($eligibleControlOutcomes -join ', '))
         }
         else {
-            Write-Log ("LV2026 control probe failed: {0}" -f [string]$result.control_probe.reason)
+            $activeLabVIEWProcessNames = @()
+            try {
+                $activeLabVIEWProcessNames = @(
+                    Get-Process -ErrorAction SilentlyContinue |
+                    Where-Object { $_.ProcessName -match '(?i)labview' } |
+                    Select-Object -ExpandProperty ProcessName -Unique |
+                    Sort-Object
+                )
+            }
+            catch {
+                Write-Log ("WARNING: Unable to enumerate LabVIEW processes before control probe: {0}" -f $_.Exception.Message)
+            }
+
+            $result.control_probe.active_labview_processes = @($activeLabVIEWProcessNames)
+            if ($activeLabVIEWProcessNames.Count -gt 0) {
+                $result.control_probe.reason = 'skipped_active_labview_processes'
+                Write-Log ("Skipping LV2026 control probe because active LabVIEW processes were detected: {0}" -f ($activeLabVIEWProcessNames -join ', '))
+            }
+            else {
+                Write-Log 'LV2020 run/report path failed; running diagnostic-only LV2026 control probe.'
+                $result.control_probe = Invoke-Lv2026ControlProbe `
+                    -GcliCommandPath $gcliCommandPath `
+                    -SourceProjectRoot $resolvedSourceProjectRoot `
+                    -ProjectRelativePath ([string]$result.source.project_relative_path) `
+                    -SourceLvversionRaw $sourceLvversionRaw `
+                    -ReportPath $paths.control_report_path
+
+                if ([string]$result.control_probe.status -eq 'passed') {
+                    Write-Log 'LV2026 control probe passed. LV2020 failure is likely version-specific compatibility/discovery.'
+                }
+                else {
+                    Write-Log ("LV2026 control probe failed: {0}" -f [string]$result.control_probe.reason)
+                }
+            }
         }
     }
     elseif (-not $runPhaseStarted) {

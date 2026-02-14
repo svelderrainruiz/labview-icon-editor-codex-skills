@@ -180,6 +180,7 @@ jobs:
           $controlProbeValidation = ''
           $controlProbeRunExit = ''
           $controlProbeReportPath = Join-Path $outputDirectory 'reports/lunit-report-2026-control.xml'
+          $controlProbeActiveProcesses = ''
           if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
             try {
               $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
@@ -198,6 +199,9 @@ jobs:
                 }
                 if ($null -ne $resultPayload.control_probe.report_path -and -not [string]::IsNullOrWhiteSpace([string]$resultPayload.control_probe.report_path)) {
                   $controlProbeReportPath = [string]$resultPayload.control_probe.report_path
+                }
+                if ($null -ne $resultPayload.control_probe.active_labview_processes) {
+                  $controlProbeActiveProcesses = (@($resultPayload.control_probe.active_labview_processes) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ', '
                 }
               }
             } catch {
@@ -225,7 +229,11 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($reason)) {
             $summary += ("- Reason: {0}" -f $reason.Replace("`r", ' ').Replace("`n", ' '))
           }
-          if (-not [string]::IsNullOrWhiteSpace($controlProbeStatus) -and $controlProbeStatus -ne 'not_run') {
+          $controlProbeWasRelevant = (
+            (-not [string]::IsNullOrWhiteSpace($controlProbeStatus) -and $controlProbeStatus -ne 'not_run') -or
+            (-not [string]::IsNullOrWhiteSpace($controlProbeReason) -and $controlProbeReason -ne 'not_triggered')
+          )
+          if ($controlProbeWasRelevant) {
             $summary += ''
             $summary += '### LV2026 Comparative Control Probe (diagnostic only)'
             $summary += ("- Status: {0}" -f $controlProbeStatus)
@@ -238,6 +246,9 @@ jobs:
             $summary += ("- Report path: {0}" -f $controlProbeReportPath)
             if (-not [string]::IsNullOrWhiteSpace($controlProbeReason) -and $controlProbeReason -ne 'control_probe_passed') {
               $summary += ("- Reason: {0}" -f $controlProbeReason.Replace("`r", ' ').Replace("`n", ' '))
+            }
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeActiveProcesses)) {
+              $summary += ("- Active LabVIEW processes at probe decision time: {0}" -f $controlProbeActiveProcesses)
             }
             if ($controlProbeStatus -eq 'passed' -and $status -ne 'passed') {
               $summary += '- Interpretation: LV2026 control probe passed; LV2020 failure is likely LV2020-specific compatibility/discovery.'

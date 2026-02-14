@@ -41,6 +41,8 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match 'Invoke-Lv2026ControlProbe'
         $script:scriptContent | Should -Match 'diagnostic-only LV2026 control probe'
         $script:scriptContent | Should -Match 'control_probe'
+        $script:scriptContent | Should -Match 'skipped_active_labview_processes'
+        $script:scriptContent | Should -Match 'eligibleControlOutcomes = @\(''no_testcases'', ''failed_testcases''\)'
         $script:scriptContent | Should -Match 'lunit-smoke\.status\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.result\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.log'
@@ -281,15 +283,21 @@ exit /b 0
             $thrownMessage | Should -Match 'LabVIEW 2020 LUnit smoke gate failed'
             $thrownMessage | Should -Match 'no_testcases'
             Test-Path -LiteralPath (Join-Path $outputDirectory 'reports/lunit-report-64.xml') -PathType Leaf | Should -BeTrue
-            Test-Path -LiteralPath (Join-Path $outputDirectory 'reports/lunit-report-2026-control.xml') -PathType Leaf | Should -BeTrue
 
             $resultPayload = Get-Content -LiteralPath (Join-Path $outputDirectory 'lunit-smoke.result.json') -Raw | ConvertFrom-Json
             [string]$resultPayload.status | Should -Be 'failed'
             [string]$resultPayload.report.validation_outcome | Should -Be 'no_testcases'
-            [bool]$resultPayload.control_probe.executed | Should -BeTrue
-            [string]$resultPayload.control_probe.status | Should -Be 'passed'
-            [string]$resultPayload.control_probe.validation_outcome | Should -Be 'passed'
-            [string]$resultPayload.control_probe.command | Should -Match '--lv-ver 2026'
+            $controlStatus = [string]$resultPayload.control_probe.status
+            if ($controlStatus -eq 'passed') {
+                [bool]$resultPayload.control_probe.executed | Should -BeTrue
+                [string]$resultPayload.control_probe.validation_outcome | Should -Be 'passed'
+                [string]$resultPayload.control_probe.command | Should -Match '--lv-ver 2026'
+                Test-Path -LiteralPath (Join-Path $outputDirectory 'reports/lunit-report-2026-control.xml') -PathType Leaf | Should -BeTrue
+            }
+            else {
+                $controlStatus | Should -Be 'not_run'
+                [string]$resultPayload.control_probe.reason | Should -Be 'skipped_active_labview_processes'
+            }
 
             [string](Get-Content -LiteralPath (Join-Path $sourceRoot '.lvversion') -Raw).Trim() | Should -Be '26.0'
         }
