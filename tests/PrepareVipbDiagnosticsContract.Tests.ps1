@@ -466,4 +466,97 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             }
         }
     }
+
+    It 'captures diagnostics and fails when .lvversion is earlier than 20.0' {
+        $tempRoot = Join-Path $env:TEMP ("vipb-diag-min-version-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        try {
+            $repoRootPath = Join-Path $tempRoot 'repo'
+            New-Item -Path $repoRootPath -ItemType Directory -Force | Out-Null
+            '19.0' | Set-Content -LiteralPath (Join-Path $repoRootPath '.lvversion') -Encoding ASCII
+
+            $vipbPath = Join-Path $tempRoot 'fixture.vipb'
+            $releaseNotesPath = Join-Path $tempRoot 'release_notes.md'
+            $outputDir = Join-Path $tempRoot 'output'
+
+            @'
+<VI_Package_Builder_Settings>
+  <Library_General_Settings>
+    <Library_Version>0.0.0.0</Library_Version>
+    <Package_LabVIEW_Version>19.0 (64-bit)</Package_LabVIEW_Version>
+    <Company_Name>old-company</Company_Name>
+    <Product_Name>old-product</Product_Name>
+  </Library_General_Settings>
+  <Advanced_Settings>
+    <Description>
+      <One_Line_Description_Summary>old-summary</One_Line_Description_Summary>
+      <Packager>old-packager</Packager>
+      <URL>https://example.invalid</URL>
+      <Copyright>old-copyright</Copyright>
+      <Release_Notes>old-notes</Release_Notes>
+      <Description>old-description</Description>
+    </Description>
+    <License_Agreement_Filepath>old-license</License_Agreement_Filepath>
+    <Source_Files>
+      <Exclusions>
+        <Path>builds</Path>
+      </Exclusions>
+    </Source_Files>
+  </Advanced_Settings>
+</VI_Package_Builder_Settings>
+'@ | Set-Content -LiteralPath $vipbPath -Encoding UTF8
+            'notes' | Set-Content -LiteralPath $releaseNotesPath -Encoding UTF8
+
+            $displayInfo = @{
+                'Package Version' = @{
+                    major = 0
+                    minor = 1
+                    patch = 0
+                    build = 1
+                }
+                'Company Name' = 'fixture-company'
+                'Product Name' = 'fixture-product'
+                'Product Description Summary' = 'fixture-summary'
+                'Product Description' = 'fixture-description'
+                'Author Name (Person or Company)' = 'fixture-author'
+                'Product Homepage (URL)' = 'https://github.com/example/repo'
+                'Legal Copyright' = 'fixture-copyright'
+                'Release Notes - Change Log' = 'notes'
+            } | ConvertTo-Json -Depth 6 -Compress
+
+            $failed = $false
+            try {
+                & $script:scriptPath `
+                    -RepoRoot $repoRootPath `
+                    -VipbPath $vipbPath `
+                    -ReleaseNotesFile $releaseNotesPath `
+                    -DisplayInformationJson $displayInfo `
+                    -LabVIEWVersionYear 2019 `
+                    -LabVIEWMinorRevision 0 `
+                    -SupportedBitness '64' `
+                    -Major 0 `
+                    -Minor 1 `
+                    -Patch 0 `
+                    -Build 1 `
+                    -Commit 'abc123' `
+                    -OutputDirectory $outputDir `
+                    -UpdateScriptPath $script:updateScriptPath
+            }
+            catch {
+                $failed = $true
+            }
+
+            $failed | Should -BeTrue
+            $status = Get-Content -LiteralPath (Join-Path $outputDir 'prepare-vipb.status.json') -Raw | ConvertFrom-Json
+            [string]$status.status | Should -Be 'failed'
+
+            $errorPayload = Get-Content -LiteralPath (Join-Path $outputDir 'prepare-vipb.error.json') -Raw | ConvertFrom-Json
+            [string]$errorPayload.message | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+        }
+        finally {
+            if (Test-Path -LiteralPath $tempRoot -PathType Container) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
 }

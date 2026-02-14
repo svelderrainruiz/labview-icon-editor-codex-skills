@@ -40,7 +40,7 @@ Installer contract:
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
-- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
+- Trigger: all pull requests and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
@@ -56,9 +56,13 @@ Installer contract:
   - source project `.lvversion` remains authoritative for VIPB target enforcement.
 - VIPB version authority contract:
   - `prepare-vipb-linux` treats `consumer/.lvversion` (source project) as authoritative for VIPB LabVIEW target.
+  - minimum supported source project `.lvversion` is `20.0`; values earlier than `20.0` fail deterministically.
   - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
   - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
   - canonical updater script: `scripts/Update-Vipb.DisplayInfo.ps1`; compatibility shim `scripts/Update-VipbDisplayInfo.ps1` is deprecated and forwards to canonical.
+- Windows parity preflight contract:
+  - `build-x64-ppl-windows` derives `lv_icon_editor.lvproj` path dynamically and injects it into container parity env vars.
+  - `.lvversion` must be colocated with `lv_icon_editor.lvproj`.
 - Failure triage:
   - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
 - PPL source contract (CI Pipeline lane):

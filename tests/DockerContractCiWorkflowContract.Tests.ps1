@@ -98,7 +98,17 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'builds windows x64 PPL in windows container and uploads windows x64 bundle artifact' {
+        $script:workflowContent | Should -Match 'Validate Windows container parity assets'
+        $script:workflowContent | Should -Match 'Get-ChildItem -Path \$consumerRoot -Recurse -File -Filter ''lv_icon_editor\.lvproj'''
+        $script:workflowContent | Should -Match 'Missing ''\.lvversion'' alongside ''lv_icon_editor\.lvproj'''
+        $script:workflowContent | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+        $script:workflowContent | Should -Match 'WINDOWS_PROJECT_RELATIVE_PATH='
+        $script:workflowContent | Should -Match 'WINDOWS_PROJECT_CONTAINER_PATH='
         $script:workflowContent | Should -Match 'Build Windows x64 PPL in NI Windows container'
+        $script:workflowContent | Should -Match 'LVIE_PROJECT_RELATIVE_PATH=\$projectRelativePath'
+        $script:workflowContent | Should -Match 'PROJECT_PATH_REL=\$projectRelativePath'
+        $script:workflowContent | Should -Match 'LVIE_PROJECT_PATH=\$projectContainerPath'
+        $script:workflowContent | Should -Match 'PROJECT_PATH=\$projectContainerPath'
         $script:workflowContent | Should -Match 'runlabview-windows\.ps1'
         $script:workflowContent | Should -Match 'Create Windows x64 PPL bundle manifest'
         $script:workflowContent | Should -Match 'Upload Windows raw x64 PPL artifact'

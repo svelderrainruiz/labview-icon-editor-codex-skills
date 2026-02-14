@@ -168,6 +168,9 @@ function Resolve-LvversionAuthorityInfo {
 
     $major = [int]$Matches['major']
     $minor = [int]$Matches['minor']
+    if ($major -lt 20) {
+        throw ".lvversion '$rawValue' is unsupported. Minimum supported LabVIEW version is 20.0."
+    }
     $year = 2000 + $major
     $numeric = "{0}.{1}" -f $major, $minor
     $expectedVipbTarget = if ($Bitness -eq '64') {

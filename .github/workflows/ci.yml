@@ -104,15 +104,56 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $required = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/container-parity/runlabview-windows.ps1'
-          if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-            throw "Missing required source project script '$required'."
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredParityScript = Join-Path $consumerRoot 'Tooling/container-parity/runlabview-windows.ps1'
+          if (-not (Test-Path -LiteralPath $requiredParityScript -PathType Leaf)) {
+            throw "Missing required source project script '$requiredParityScript'."
           }
+
+          $projectCandidates = @(Get-ChildItem -Path $consumerRoot -Recurse -File -Filter 'lv_icon_editor.lvproj')
+          if ($projectCandidates.Count -eq 0) {
+            throw "Unable to locate 'lv_icon_editor.lvproj' under '$consumerRoot'."
+          }
+          if ($projectCandidates.Count -gt 1) {
+            $candidateList = ($projectCandidates | ForEach-Object { $_.FullName }) -join '; '
+            throw "Expected exactly one 'lv_icon_editor.lvproj' under '$consumerRoot', found $($projectCandidates.Count): $candidateList"
+          }
+
+          $projectPath = $projectCandidates[0].FullName
+          $projectDirectory = Split-Path -Path $projectPath -Parent
+          $lvversionPath = Join-Path $projectDirectory '.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Missing '.lvversion' alongside 'lv_icon_editor.lvproj'. Expected: '$lvversionPath'."
+          }
+
+          $lvversionRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          if ($lvversionRaw -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw ".lvversion value '$lvversionRaw' is invalid. Expected numeric major.minor format (for example '26.0')."
+          }
+          $lvMajor = [int]$Matches['major']
+          if ($lvMajor -lt 20) {
+            throw ".lvversion '$lvversionRaw' is unsupported. Minimum supported LabVIEW version is 20.0."
+          }
+
+          $projectRelativePath = [System.IO.Path]::GetRelativePath($consumerRoot, $projectPath).Replace('\', '/')
+          $projectRelativePathWindows = $projectRelativePath -replace '/', '\'
+          $projectContainerPath = "C:\workspace\$projectRelativePathWindows"
+
+          "WINDOWS_PROJECT_RELATIVE_PATH=$projectRelativePathWindows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_PROJECT_CONTAINER_PATH=$projectContainerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Resolved Windows parity project path: $projectRelativePathWindows"
+          Write-Host "Validated .lvversion at: $lvversionPath"
 
       - name: Build Windows x64 PPL in NI Windows container
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $projectRelativePath = [string]$env:WINDOWS_PROJECT_RELATIVE_PATH
+          $projectContainerPath = [string]$env:WINDOWS_PROJECT_CONTAINER_PATH
+          if ([string]::IsNullOrWhiteSpace($projectRelativePath) -or [string]::IsNullOrWhiteSpace($projectContainerPath)) {
+            throw "Missing Windows project path environment from validation step. Expected WINDOWS_PROJECT_RELATIVE_PATH and WINDOWS_PROJECT_CONTAINER_PATH."
+          }
           $windowsPplTargetRelativePath = $env:WINDOWS_PPL_OUTPUT_PATH
           if ($windowsPplTargetRelativePath.StartsWith('consumer/')) {
             $windowsPplTargetRelativePath = $windowsPplTargetRelativePath.Substring('consumer/'.Length)
@@ -134,10 +175,10 @@ jobs:
             -e LVIE_REPO_ROOT=C:\workspace `
             -e WORKSPACE_ROOT=C:\workspace `
             -e REPO_ROOT=C:\workspace `
-            -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
-            -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
-            -e "LVIE_PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
-            -e "PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
+            -e "LVIE_PROJECT_RELATIVE_PATH=$projectRelativePath" `
+            -e "PROJECT_PATH_REL=$projectRelativePath" `
+            -e "LVIE_PROJECT_PATH=$projectContainerPath" `
+            -e "PROJECT_PATH=$projectContainerPath" `
             -e "TARGET_DIR_REL=Test\Templates" `
             -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
             -e "CONTAINER_PARITY_BUILD_SPEC=true" `

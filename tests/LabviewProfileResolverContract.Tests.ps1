@@ -153,4 +153,34 @@ Describe 'LabVIEW profile resolver contract' {
             }
         }
     }
+
+    It 'fails deterministically when source project .lvversion is earlier than 20.0' {
+        $tempRoot = Join-Path $env:TEMP ("labview-profile-min-version-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        try {
+            $consumerRoot = Join-Path $tempRoot 'consumer'
+            New-Item -Path $consumerRoot -ItemType Directory -Force | Out-Null
+            '19.0' | Set-Content -LiteralPath (Join-Path $consumerRoot '.lvversion') -Encoding ASCII
+            $outputPath = Join-Path $tempRoot 'profile-resolution.json'
+
+            $commandOutput = & pwsh -NoProfile -File $script:scriptPath `
+                -ProfilesRoot $script:profilesRoot `
+                -ConsumerRepoRoot $consumerRoot `
+                -SupportedBitness '64' `
+                -OutputPath $outputPath 2>&1
+
+            $LASTEXITCODE | Should -Not -Be 0
+            [string]($commandOutput -join [Environment]::NewLine) | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+            Test-Path -LiteralPath $outputPath -PathType Leaf | Should -BeTrue
+
+            $resolution = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
+            [string]$resolution.comparison_result | Should -Be 'invalid'
+            [string]$resolution.error.message | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+        }
+        finally {
+            if (Test-Path -LiteralPath $tempRoot -PathType Container) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
 }
