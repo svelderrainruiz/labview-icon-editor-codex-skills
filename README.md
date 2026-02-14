@@ -34,18 +34,22 @@ Installer contract:
 - Consumer lock defines installer args and install-root template.
 
 ## Docker CI
-- Workflow: `.github/workflows/docker-contract-ci.yml`
-- Purpose: run repository contract tests and then build/publish deterministic Windows and Linux PPL bundles in strict order.
+- Workflow: `.github/workflows/ci.yml`
+- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, then build a native self-hosted Windows VI package.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
 - Pipeline order:
-  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
-- PPL source contract (docker-contract-ci lane):
+  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux` -> `build-vip-self-hosted`
+- PPL source contract (CI Pipeline lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
   - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
   - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
   - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
+- Native self-hosted packaging contract:
+  - runner labels: `[self-hosted, windows, self-hosted-windows-lv]`
+  - native PPL outputs required by `.vipb`: `consumer/resource/plugins/lv_icon_x64.lvlibp` and `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - package version baseline for native lane: `0.1.0.<run_number>`
 - Published artifacts:
   - `docker-contract-ppl-bundle-windows-<run_id>` containing:
     - `lv_icon.windows.lvlibp`
@@ -53,6 +57,8 @@ Installer contract:
   - `docker-contract-ppl-bundle-linux-<run_id>` containing:
     - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-vip-package-self-hosted-<run_id>` containing:
+    - latest built `.vip` from the native self-hosted lane
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
 - Local run (NI LabVIEW Linux image already on this machine):

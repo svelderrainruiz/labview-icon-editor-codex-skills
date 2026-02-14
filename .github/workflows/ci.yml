@@ -1,4 +1,4 @@
-name: docker-contract-ci
+name: CI Pipeline
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
       - 'docs/**'
       - 'manifest.json'
       - 'README.md'
-      - '.github/workflows/docker-contract-ci.yml'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 permissions:
@@ -25,6 +25,7 @@ env:
   LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
   WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
   LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
+  VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
   LABVIEW_VERSION: '2026'
   BITNESS: '64'
 
@@ -339,4 +340,230 @@ jobs:
         with:
           name: docker-contract-ppl-bundle-linux-${{ github.run_id }}
           path: ${{ runner.temp }}/ppl-bundle-linux
+          if-no-files-found: error
+
+  build-vip-self-hosted:
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    needs: [build-ppl-windows, build-ppl-linux]
+    env:
+      VERSION_MAJOR: '0'
+      VERSION_MINOR: '1'
+      VERSION_PATCH: '0'
+      VERSION_BUILD: '${{ github.run_number }}'
+      VERSION_COMMIT: '${{ github.sha }}'
+      VIPM_TIMEOUT_SECONDS: '900'
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - name: Validate self-hosted native LabVIEW prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredFiles = @(
+            'Tooling/Invoke-VipBuild.ps1',
+            '.github/actions/build-lvlibp/BuildProjectSpec.ps1',
+            '.github/actions/rename-file/Rename-file.ps1',
+            '.github/actions/modify-vipb-display-info/ModifyVIPBDisplayInfo.ps1',
+            'Tooling/support/LabVIEWVersion.ps1',
+            'Tooling/deployment/NI Icon editor.vipb'
+          )
+          foreach ($relativePath in $requiredFiles) {
+            $fullPath = Join-Path $consumerRoot $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+              throw "Missing required consumer asset '$fullPath'."
+            }
+          }
+          if (-not (Get-Command g-cli -ErrorAction SilentlyContinue)) {
+            throw "Required command 'g-cli' not found on PATH for self-hosted packaging lane."
+          }
+
+      - id: labview-version
+        name: Resolve LabVIEW version from consumer repo
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $versionHelper = Join-Path $consumerRoot 'Tooling/support/LabVIEWVersion.ps1'
+          . $versionHelper
+          $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
+          "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
+
+      - name: Ensure release notes file exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          }
+
+      - name: Build native 64-bit PPL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -SupportedBitness 64 `
+            -RepoRoot "$consumerRoot" `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT
+          & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
+            -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
+            -NewFilename "$consumerRoot/resource/plugins/lv_icon_x64.lvlibp"
+
+      - name: Build native 32-bit PPL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -SupportedBitness 32 `
+            -RepoRoot "$consumerRoot" `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT
+          & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
+            -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
+            -NewFilename "$consumerRoot/resource/plugins/lv_icon_x86.lvlibp"
+
+      - name: Validate native x64 or x86 PPL outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $x64Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x64.lvlibp'
+          $x86Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x86.lvlibp'
+          if (-not (Test-Path -LiteralPath $x64Path -PathType Leaf)) {
+            throw "Native x64 PPL output not found at '$x64Path'."
+          }
+          if (-not (Test-Path -LiteralPath $x86Path -PathType Leaf)) {
+            throw "Native x86 PPL output not found at '$x86Path'."
+          }
+
+      - id: display-info
+        name: Generate VIP display information JSON
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
+          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
+            Get-Content -Raw -Path $releaseNotesPath
+          } else {
+            ''
+          }
+
+          $info = @{
+            "Package Version" = @{
+              "major" = [int]$env:VERSION_MAJOR
+              "minor" = [int]$env:VERSION_MINOR
+              "patch" = [int]$env:VERSION_PATCH
+              "build" = [int]$env:VERSION_BUILD
+            }
+            "Product Name" = "labview-icon-editor"
+            "Company Name" = "${{ github.repository_owner }}"
+            "Author Name (Person or Company)" = "${{ github.repository }}"
+            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
+            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
+            "Product Description Summary" = "labview-icon-editor VI Package build."
+            "Product Description" = "labview-icon-editor VI Package build."
+            "Release Notes - Change Log" = $releaseNotes
+          }
+
+          $json = $info | ConvertTo-Json -Depth 6 -Compress
+          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Modify VIPB display info (LV 64-bit)
+        shell: pwsh
+        env:
+          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/.github/actions/modify-vipb-display-info/ModifyVIPBDisplayInfo.ps1" `
+            -SupportedBitness 64 `
+            -RepoRoot "$consumerRoot" `
+            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
+            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON
+
+      - name: Build VI Package (LV 64-bit)
+        shell: pwsh
+        env:
+          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/Tooling/Invoke-VipBuild.ps1" `
+            -SupportedBitness 64 `
+            -RepoRoot "$consumerRoot" `
+            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
+            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON `
+            -VipmTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS
+
+      - id: locate-vip
+        name: Locate built VI package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $vipCandidates = Get-ChildItem -Path $consumerRoot -Recurse -File -Filter '*.vip' |
+            Sort-Object LastWriteTimeUtc -Descending
+
+          if (-not $vipCandidates -or $vipCandidates.Count -eq 0) {
+            throw "No .vip artifact found under '$consumerRoot' after self-hosted native package build."
+          }
+
+          $vipFile = $vipCandidates[0]
+          "vip_file_path=$($vipFile.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_file_name=$($vipFile.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload self-hosted VI Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vip-package-self-hosted-${{ github.run_id }}
+          path: ${{ steps.locate-vip.outputs.vip_file_path }}
           if-no-files-found: error

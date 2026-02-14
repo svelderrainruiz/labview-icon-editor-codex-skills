@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 Describe 'Docker contract CI workflow contract' {
     BeforeAll {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
-        $script:workflowPath = Join-Path $script:repoRoot '.github/workflows/docker-contract-ci.yml'
+        $script:workflowPath = Join-Path $script:repoRoot '.github/workflows/ci.yml'
 
         if (-not (Test-Path -Path $script:workflowPath -PathType Leaf)) {
             throw "Required workflow missing: $script:workflowPath"
@@ -15,13 +15,21 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent = Get-Content -Path $script:workflowPath -Raw
     }
 
-    It 'defines ordered contract-tests then windows then linux PPL jobs' {
+    It 'defines CI Pipeline workflow name and trigger path' {
+        $script:workflowContent | Should -Match 'name:\s*CI Pipeline'
+        $script:workflowContent | Should -Match '\.github/workflows/ci\.yml'
+    }
+
+    It 'defines ordered contract-tests then windows then linux then self-hosted package jobs' {
         $script:workflowContent | Should -Match 'contract-tests:'
         $script:workflowContent | Should -Match 'build-ppl-windows:'
         $script:workflowContent | Should -Match 'build-ppl-linux:'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-ppl-windows\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-ppl-windows,\s*build-ppl-linux\]'
     }
 
     It 'defines pinned consumer source and shared windows or linux build constants' {
@@ -62,5 +70,30 @@ Describe 'Docker contract CI workflow contract' {
 
     It 'creates manifests for both windows and linux bundles' {
         ([regex]::Matches($script:workflowContent, 'scripts/New-PplBundleManifest\.ps1')).Count | Should -BeGreaterOrEqual 2
+    }
+
+    It 'defines self-hosted native package version constants using 0.1.0 baseline' {
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_MAJOR:\s*''0'''
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_MINOR:\s*''1'''
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_PATCH:\s*''0'''
+    }
+
+    It 'builds native x64 and x86 PPLs before VIP build in self-hosted lane' {
+        $script:workflowContent | Should -Match 'Build native 64-bit PPL'
+        $script:workflowContent | Should -Match 'Build native 32-bit PPL'
+        $script:workflowContent | Should -Match '-SupportedBitness 64'
+        $script:workflowContent | Should -Match '-SupportedBitness 32'
+        $script:workflowContent | Should -Match 'lv_icon_x64\.lvlibp'
+        $script:workflowContent | Should -Match 'lv_icon_x86\.lvlibp'
+    }
+
+    It 'stamps 0.1.0 version in native build calls and uploads self-hosted VIP artifact' {
+        $script:workflowContent | Should -Match 'BuildProjectSpec\.ps1'
+        $script:workflowContent | Should -Match 'ModifyVIPBDisplayInfo\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-VipBuild\.ps1'
+        $script:workflowContent | Should -Match '-Major \$env:VERSION_MAJOR'
+        $script:workflowContent | Should -Match '-Minor \$env:VERSION_MINOR'
+        $script:workflowContent | Should -Match '-Patch \$env:VERSION_PATCH'
+        $script:workflowContent | Should -Match 'docker-contract-vip-package-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
     }
 }
