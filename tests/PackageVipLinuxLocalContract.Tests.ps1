@@ -32,7 +32,7 @@ Describe 'Local package-vip-linux helper contract' {
         $script:helperContent | Should -Match 'vipm is not available on PATH inside Linux image'
         $script:helperContent | Should -Match 'PATH=\$PATH'
         $script:helperContent | Should -Match "vipm lookup: \$\(command -v vipm \|\| echo 'not-found'\)"
-        $script:helperContent | Should -Match "docker build --build-arg VIPM_CLI_URL='<artifact-url>'"
-        $script:helperContent | Should -Match "--build-arg VIPM_CLI_SHA256='<sha256>'"
+        $script:helperContent | Should -Match 'docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL'
+        $script:helperContent | Should -Match '--build-arg VIPM_CLI_SHA256=SHA256'
     }
 }

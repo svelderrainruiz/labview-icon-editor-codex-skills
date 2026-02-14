@@ -34,7 +34,7 @@ if ! command -v vipm >/dev/null 2>&1; then
   echo "PATH=$PATH" >&2
   echo "vipm lookup: $(command -v vipm || echo 'not-found')" >&2
   echo "To triage deterministically, rebuild with VIPM CLI args:" >&2
-  echo "  docker build --build-arg VIPM_CLI_URL='<artifact-url>' --build-arg VIPM_CLI_SHA256='<sha256>' --build-arg VIPM_CLI_ARCHIVE_TYPE='tar.gz' -t $LINUX_LABVIEW_IMAGE -f docker/ni-lv-pwsh.Dockerfile ." >&2
+  echo "  docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL --build-arg VIPM_CLI_SHA256=SHA256 --build-arg VIPM_CLI_ARCHIVE_TYPE=tar.gz -t $LINUX_LABVIEW_IMAGE -f docker/ni-lv-pwsh.Dockerfile ." >&2
   exit 1
 fi
 
