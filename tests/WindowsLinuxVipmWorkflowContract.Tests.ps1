@@ -40,6 +40,14 @@ Describe 'Windows->Linux VIPM package workflow contract' {
         $script:workflowContent | Should -Match 'Upload Linux PPL handoff artifact'
     }
 
+    It 'runs linux parity scripts from a CRLF-safe temp copy inside containers' {
+        $expectedSedNormalization = [regex]::Escape('sed -i ''s/\r$//'' "$script_file"')
+        $script:workflowContent | Should -Match 'tmp_script_dir="\$\(mktemp -d\)"'
+        $script:workflowContent | Should -Match 'cp -a "\$script_dir/\." "\$tmp_script_dir/"'
+        $script:workflowContent | Should -Match $expectedSedNormalization
+        $script:workflowContent | Should -Match '"\$tmp_script_dir/runlabview-linux\.sh"'
+    }
+
     It 'verifies and consumes both PPL bundles on Linux before VIPM build' {
         $script:workflowContent | Should -Match 'Download Windows PPL handoff artifact'
         $script:workflowContent | Should -Match 'Download Linux PPL handoff artifact'

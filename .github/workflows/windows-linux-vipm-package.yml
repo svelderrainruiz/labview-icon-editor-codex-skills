@@ -232,6 +232,29 @@ jobs:
             }
 
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            $linuxContainerParityCommand = @'
+            set -euo pipefail
+            script_dir=/workspace/Tooling/container-parity
+            run_script="$script_dir/runlabview-linux.sh"
+            dev_script="$script_dir/devmode-linux.sh"
+            if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+              echo "Missing required container parity scripts in consumer repo:" >&2
+              echo "  expected: $run_script" >&2
+              echo "  expected: $dev_script" >&2
+              echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+              ls -la /workspace/Tooling >&2 || true
+              exit 127
+            fi
+            tmp_script_dir="$(mktemp -d)"
+            cleanup() { rm -rf "$tmp_script_dir"; }
+            trap cleanup EXIT
+            cp -a "$script_dir/." "$tmp_script_dir/"
+            while IFS= read -r -d '' script_file; do
+              sed -i 's/\r$//' "$script_file"
+            done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
+            chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
+            "$tmp_script_dir/runlabview-linux.sh"
+'@
             docker run --rm `
               -v "${consumerWorkspace}:/workspace" `
               -w /workspace `
@@ -251,7 +274,7 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               -e "LABVIEW_COMMUNITY_EDITION=$env:LABVIEW_COMMUNITY_EDITION" `
               "$env:LINUX_LABVIEW_IMAGE" `
-              bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
+              bash -lc $linuxContainerParityCommand
             $buildExitCode = $LASTEXITCODE
           }
 
@@ -389,6 +412,29 @@ jobs:
           }
           else {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            $linuxContainerParityCommand = @'
+            set -euo pipefail
+            script_dir=/workspace/Tooling/container-parity
+            run_script="$script_dir/runlabview-linux.sh"
+            dev_script="$script_dir/devmode-linux.sh"
+            if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+              echo "Missing required container parity scripts in consumer repo:" >&2
+              echo "  expected: $run_script" >&2
+              echo "  expected: $dev_script" >&2
+              echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+              ls -la /workspace/Tooling >&2 || true
+              exit 127
+            fi
+            tmp_script_dir="$(mktemp -d)"
+            cleanup() { rm -rf "$tmp_script_dir"; }
+            trap cleanup EXIT
+            cp -a "$script_dir/." "$tmp_script_dir/"
+            while IFS= read -r -d '' script_file; do
+              sed -i 's/\r$//' "$script_file"
+            done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
+            chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
+            "$tmp_script_dir/runlabview-linux.sh"
+'@
             docker run --rm `
               -v "${consumerWorkspace}:/workspace" `
               -w /workspace `
@@ -408,7 +454,7 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               -e "LABVIEW_COMMUNITY_EDITION=$env:LABVIEW_COMMUNITY_EDITION" `
               "$env:LINUX_LABVIEW_IMAGE" `
-              bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
+              bash -lc $linuxContainerParityCommand
           }
 
           if ($LASTEXITCODE -ne 0) {
