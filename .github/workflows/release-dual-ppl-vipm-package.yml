@@ -1,6 +1,9 @@
 name: release-dual-ppl-vipm-package
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       consumer_repo:

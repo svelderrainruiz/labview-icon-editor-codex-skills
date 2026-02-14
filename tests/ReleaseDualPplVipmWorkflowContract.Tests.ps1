@@ -16,6 +16,8 @@ Describe 'Release dual PPL VIPM workflow contract' {
     }
 
     It 'defines parallel producer jobs and linux package consumer job' {
+        $script:workflowContent | Should -Match 'pull_request:'
+        $script:workflowContent | Should -Match 'branches:\s*\r?\n\s*-\s*main'
         $script:workflowContent | Should -Match 'build-ppl-windows:'
         $script:workflowContent | Should -Match 'build-ppl-linux:'
         $script:workflowContent | Should -Match 'package-vip-linux:'
