@@ -314,7 +314,7 @@ jobs:
             done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
             chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
             "$tmp_script_dir/runlabview-linux.sh"
-'@
+            '@
             docker run --rm `
               -v "${consumerWorkspace}:/workspace" `
               -w /workspace `
@@ -470,7 +470,7 @@ jobs:
             done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
             chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
             "$tmp_script_dir/runlabview-linux.sh"
-'@
+            '@
             docker run --rm `
               -v "${consumerWorkspace}:/workspace" `
               -w /workspace `
