@@ -18,6 +18,15 @@ param(
   [switch]$TriagePackageVipLinux,
 
   [Parameter(Mandatory = $false)]
+  [string]$VipmCliUrl,
+
+  [Parameter(Mandatory = $false)]
+  [string]$VipmCliSha256,
+
+  [Parameter(Mandatory = $false)]
+  [string]$VipmCliArchiveType = 'tar.gz',
+
+  [Parameter(Mandatory = $false)]
   [int]$PollSeconds = 20,
 
   [Parameter(Mandatory = $false)]
@@ -155,6 +164,18 @@ if ($TriagePackageVipLinux.IsPresent) {
   )
 
   $normalizedWorkflowInputs += $triageInputs
+}
+
+if ((-not [string]::IsNullOrWhiteSpace($VipmCliUrl)) -xor (-not [string]::IsNullOrWhiteSpace($VipmCliSha256))) {
+  throw "-VipmCliUrl and -VipmCliSha256 must be provided together."
+}
+
+if (-not [string]::IsNullOrWhiteSpace($VipmCliUrl)) {
+  $normalizedWorkflowInputs += @(
+    "vipm_cli_url=$VipmCliUrl",
+    "vipm_cli_sha256=$VipmCliSha256",
+    "vipm_cli_archive_type=$VipmCliArchiveType"
+  )
 }
 
 $normalizedWorkflowInputs = @(

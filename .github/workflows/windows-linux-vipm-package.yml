@@ -69,6 +69,25 @@ on:
         required: false
         default: true
         type: boolean
+      vipm_cli_url:
+        description: Optional URL for VIPM CLI archive used when building linux_labview_image locally.
+        required: false
+        default: ''
+        type: string
+      vipm_cli_sha256:
+        description: Optional SHA256 for VIPM CLI archive (required with vipm_cli_url).
+        required: false
+        default: ''
+        type: string
+      vipm_cli_archive_type:
+        description: VIPM CLI archive type when vipm_cli_url is provided.
+        required: false
+        default: tar.gz
+        type: choice
+        options:
+          - tar.gz
+          - tgz
+          - zip
 
 permissions:
   contents: read
@@ -113,12 +132,19 @@ jobs:
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+          VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
+          VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
+          VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
         run: |
           $ErrorActionPreference = 'Stop'
           $customCommand = @'
           ${{ inputs.windows_build_command }}
           '@.Trim()
           $buildExitCode = 0
+
+          if ((-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) -xor (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_SHA256))) {
+            throw "inputs.vipm_cli_url and inputs.vipm_cli_sha256 must be provided together."
+          }
 
           if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
             Write-Host "Executing custom windows_build_command:"
@@ -166,7 +192,18 @@ jobs:
               $dockerfilePath = Join-Path $env:GITHUB_WORKSPACE 'docker/ni-lv-pwsh.Dockerfile'
               if (Test-Path -LiteralPath $dockerfilePath -PathType Leaf) {
                 Write-Host "Preflight: pull failed; attempting local build from '$dockerfilePath'"
-                docker build -t "$env:LINUX_LABVIEW_IMAGE" -f "$dockerfilePath" "$env:GITHUB_WORKSPACE"
+                $dockerBuildArgs = @()
+                if (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) {
+                  $archiveType = if ([string]::IsNullOrWhiteSpace($env:VIPM_CLI_ARCHIVE_TYPE)) { 'tar.gz' } else { $env:VIPM_CLI_ARCHIVE_TYPE }
+                  $dockerBuildArgs += @(
+                    '--build-arg', "VIPM_CLI_URL=$env:VIPM_CLI_URL",
+                    '--build-arg', "VIPM_CLI_SHA256=$env:VIPM_CLI_SHA256",
+                    '--build-arg', "VIPM_CLI_ARCHIVE_TYPE=$archiveType"
+                  )
+                }
+
+                $dockerBuildArgs += @('-t', "$env:LINUX_LABVIEW_IMAGE", '-f', "$dockerfilePath", "$env:GITHUB_WORKSPACE")
+                docker build @dockerBuildArgs
               }
             }
             if ($LASTEXITCODE -ne 0) {
@@ -279,17 +316,35 @@ jobs:
           VIPM_COMMUNITY_EDITION: ${{ inputs.vipm_community_edition }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
           VIPM_PROJECT_PATH: ${{ inputs.vipm_project_path }}
+          VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
+          VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
+          VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
         run: |
           set -euo pipefail
 
           vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
+
+          if [[ -n "$VIPM_CLI_URL" || -n "$VIPM_CLI_SHA256" ]]; then
+            if [[ -z "$VIPM_CLI_URL" || -z "$VIPM_CLI_SHA256" ]]; then
+              echo "inputs.vipm_cli_url and inputs.vipm_cli_sha256 must be provided together." >&2
+              exit 1
+            fi
+          fi
 
           if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
             if ! docker pull "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
               dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
               if [[ -f "$dockerfile_path" ]]; then
                 echo "Preflight: pull failed; attempting local build from $dockerfile_path" >&2
-                if ! docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
+                build_args=()
+                if [[ -n "$VIPM_CLI_URL" ]]; then
+                  archive_type="${VIPM_CLI_ARCHIVE_TYPE:-tar.gz}"
+                  build_args+=(--build-arg "VIPM_CLI_URL=$VIPM_CLI_URL")
+                  build_args+=(--build-arg "VIPM_CLI_SHA256=$VIPM_CLI_SHA256")
+                  build_args+=(--build-arg "VIPM_CLI_ARCHIVE_TYPE=$archive_type")
+                fi
+
+                if ! docker build "${build_args[@]}" -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
                   echo "Unable to pull/build Linux image: $LINUX_LABVIEW_IMAGE" >&2
                   echo "Ensure the image exists, base image access is configured, or runner auth is available." >&2
                   exit 1

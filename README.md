@@ -86,6 +86,8 @@ Installer contract:
 - `windows_build_command`: custom command for Windows PPL build. Leave blank to use built-in container parity command.
 - `windows_ppl_path`: path to generated PPL in workspace.
 - `vipm_project_path`: path to `.vipb` (or path accepted by `vipm build`).
+- `vipm_cli_url` + `vipm_cli_sha256`: optional VIPM CLI archive source/checksum used when workflow must build `linux_labview_image` locally.
+- `vipm_cli_archive_type`: archive type for `vipm_cli_url` (`tar.gz`/`tgz`/`zip`; default `tar.gz`).
 
 ### Typical dispatch values
 - `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`
@@ -116,5 +118,7 @@ Installer contract:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=main"`
 - Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
+- Remediation mode with VIPM CLI injection during image fallback builds:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux -VipmCliUrl "<artifact-url>" -VipmCliSha256 "<sha256>" -VipmCliArchiveType tar.gz`
 - Optional JSONL log output:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
