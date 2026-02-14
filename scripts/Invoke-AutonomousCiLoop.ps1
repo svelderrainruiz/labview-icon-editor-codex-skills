@@ -39,7 +39,15 @@ param(
   [switch]$StopOnFailure,
 
   [Parameter(Mandatory = $false)]
-  [string]$LogPath
+  [string]$LogPath,
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet('auto', 'runner-cli', 'gh')]
+  [string]$DispatchBackend = 'auto',
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet('auto', 'runner-cli', 'gh')]
+  [string]$RunQueryBackend = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,12 +62,156 @@ function Invoke-External {
     [string[]]$Arguments
   )
 
-  $output = & $FilePath @Arguments 2>&1
-  $exitCode = $LASTEXITCODE
+  try {
+    $output = & $FilePath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  }
+  catch {
+    $output = @($_.Exception.Message)
+    $exitCode = 127
+  }
 
   return [pscustomobject]@{
     ExitCode = $exitCode
     Output = @($output)
+  }
+}
+
+function Test-RunnerCliAvailability {
+  $probe = Invoke-External -FilePath 'runner-cli' -Arguments @('--version')
+  return [pscustomobject]@{
+    available = ($probe.ExitCode -eq 0)
+    exit_code = $probe.ExitCode
+    output = @($probe.Output)
+  }
+}
+
+function Invoke-WorkflowDispatch {
+  param(
+    [Parameter(Mandatory)]
+    [ValidateSet('auto', 'runner-cli', 'gh')]
+    [string]$Backend,
+
+    [Parameter(Mandatory)]
+    [string]$WorkflowFile,
+
+    [Parameter(Mandatory)]
+    [string]$Branch,
+
+    [Parameter(Mandatory)]
+    [string[]]$Inputs,
+
+    [Parameter(Mandatory)]
+    [bool]$RunnerCliAvailable
+  )
+
+  $runnerArgs = @('github', 'workflow', 'dispatch', '--workflow', $WorkflowFile, '--ref', $Branch)
+  foreach ($pair in @($Inputs)) {
+    $runnerArgs += @('--field', $pair)
+  }
+
+  $ghArgs = @('workflow', 'run', $WorkflowFile, '--ref', $Branch)
+  foreach ($pair in @($Inputs)) {
+    $ghArgs += @('-f', $pair)
+  }
+
+  $tryRunnerFirst = ($Backend -eq 'runner-cli') -or ($Backend -eq 'auto' -and $RunnerCliAvailable)
+  if ($tryRunnerFirst) {
+    if (-not $RunnerCliAvailable) {
+      throw "Dispatch backend 'runner-cli' requested but runner-cli is not available."
+    }
+
+    $runnerDispatch = Invoke-External -FilePath 'runner-cli' -Arguments $runnerArgs
+    if ($runnerDispatch.ExitCode -eq 0) {
+      return [pscustomobject]@{
+        method = 'runner-cli'
+        exit_code = [int]$runnerDispatch.ExitCode
+        output_preview = @($runnerDispatch.Output | Select-Object -First 12 | ForEach-Object { [string]$_ })
+      }
+    }
+
+    if ($Backend -eq 'runner-cli') {
+      $runnerOutput = ($runnerDispatch.Output -join "`n")
+      throw "Workflow dispatch failed via runner-cli: $runnerOutput"
+    }
+  }
+
+  if ($Backend -eq 'gh' -or $Backend -eq 'auto' -or ($Backend -eq 'auto' -and -not $RunnerCliAvailable)) {
+    $ghDispatch = Invoke-External -FilePath 'gh' -Arguments $ghArgs
+    if ($ghDispatch.ExitCode -ne 0) {
+      $ghOutput = ($ghDispatch.Output -join "`n")
+      throw "Workflow dispatch failed via gh: $ghOutput"
+    }
+
+    return [pscustomobject]@{
+      method = 'gh'
+      exit_code = [int]$ghDispatch.ExitCode
+      output_preview = @($ghDispatch.Output | Select-Object -First 12 | ForEach-Object { [string]$_ })
+    }
+  }
+
+  throw "Unsupported dispatch backend: $Backend"
+}
+
+function Invoke-WorkflowRunList {
+  param(
+    [Parameter(Mandatory)]
+    [ValidateSet('auto', 'runner-cli', 'gh')]
+    [string]$Backend,
+
+    [Parameter(Mandatory)]
+    [string]$WorkflowFile,
+
+    [Parameter(Mandatory)]
+    [string]$Branch,
+
+    [Parameter(Mandatory)]
+    [bool]$RunnerCliAvailable
+  )
+
+  $runnerArgs = @('github', 'run', 'list', '--workflow', $WorkflowFile, '--branch', $Branch, '--limit', '20', '--json')
+  $ghArgs = @('run', 'list', '--workflow', $WorkflowFile, '--branch', $Branch, '--limit', '20', '--json', 'databaseId,url,status,conclusion,createdAt,headSha,event')
+
+  $tryRunnerFirst = ($Backend -eq 'runner-cli') -or ($Backend -eq 'auto' -and $RunnerCliAvailable)
+  if ($tryRunnerFirst) {
+    if (-not $RunnerCliAvailable) {
+      throw "Run-query backend 'runner-cli' requested but runner-cli is not available."
+    }
+
+    $runnerList = Invoke-External -FilePath 'runner-cli' -Arguments $runnerArgs
+    if ($runnerList.ExitCode -eq 0) {
+      try {
+        $parsed = @(($runnerList.Output -join "`n") | ConvertFrom-Json)
+        return [pscustomobject]@{
+          backend = 'runner-cli'
+          runs = @($parsed)
+        }
+      }
+      catch {
+        if ($Backend -eq 'runner-cli') {
+          throw "Run list query via runner-cli returned non-JSON output."
+        }
+      }
+    }
+    elseif ($Backend -eq 'runner-cli') {
+      $runnerOutput = ($runnerList.Output -join "`n")
+      throw "Run list query failed via runner-cli: $runnerOutput"
+    }
+  }
+
+  $ghList = Invoke-External -FilePath 'gh' -Arguments $ghArgs
+  if ($ghList.ExitCode -ne 0) {
+    return [pscustomobject]@{
+      backend = 'gh'
+      runs = @()
+      exit_code = [int]$ghList.ExitCode
+      output = @($ghList.Output)
+    }
+  }
+
+  return [pscustomobject]@{
+    backend = 'gh'
+    runs = @(($ghList.Output -join "`n") | ConvertFrom-Json)
   }
 }
 
@@ -167,6 +319,87 @@ function Get-VipmHelpPreviewEvidence {
   }
 }
 
+function Resolve-DispatchedRunMeta {
+  param(
+    [Parameter(Mandatory)]
+    [string]$WorkflowFile,
+
+    [Parameter(Mandatory)]
+    [string]$Branch,
+
+    [Parameter(Mandatory)]
+    [datetime]$StartedUtc,
+
+    [Parameter()]
+    [AllowNull()]
+    [string]$ExpectedHeadSha,
+
+    [Parameter(Mandatory)]
+    [ValidateSet('auto', 'runner-cli', 'gh')]
+    [string]$RunQueryBackend,
+
+    [Parameter(Mandatory)]
+    [bool]$RunnerCliAvailable,
+
+    [Parameter(Mandatory)]
+    [int]$PollSeconds
+  )
+
+  $attempt = 0
+  $maxAttempts = 30
+  while ($attempt -lt $maxAttempts) {
+    $attempt += 1
+    $listResult = Invoke-WorkflowRunList -Backend $RunQueryBackend -WorkflowFile $WorkflowFile -Branch $Branch -RunnerCliAvailable $RunnerCliAvailable
+    if (@($listResult.runs).Count -gt 0) {
+      $runs = @($listResult.runs)
+      if ($runs.Count -gt 0) {
+        $floorUtc = $StartedUtc.AddSeconds(-10)
+        $candidates = @(
+          $runs | Where-Object {
+            $event = [string]$_.event
+            $createdAtRaw = [string]$_.createdAt
+            $headSha = [string]$_.headSha
+
+            if ($event -ne 'workflow_dispatch') {
+              return $false
+            }
+
+            $createdAt = $null
+            try {
+              $createdAt = [datetimeoffset]::Parse($createdAtRaw).UtcDateTime
+            }
+            catch {
+              return $false
+            }
+
+            if ($createdAt -lt $floorUtc) {
+              return $false
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($ExpectedHeadSha) -and $headSha -ne $ExpectedHeadSha) {
+              return $false
+            }
+
+            return $true
+          } | Sort-Object {[datetime]$_.createdAt} -Descending
+        )
+
+        if ($candidates.Count -gt 0) {
+          return [ordered]@{
+            run_id = [long]$candidates[0].databaseId
+            url = [string]$candidates[0].url
+            head_sha = [string]$candidates[0].headSha
+          }
+        }
+      }
+    }
+
+    Start-Sleep -Seconds $PollSeconds
+  }
+
+  throw "Unable to correlate dispatched workflow run after $maxAttempts attempts."
+}
+
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -Path $repoRoot
 
@@ -182,6 +415,15 @@ if ([string]::IsNullOrWhiteSpace($Branch)) {
 $ghProbe = Invoke-External -FilePath 'gh' -Arguments @('--version')
 if ($ghProbe.ExitCode -ne 0) {
   throw "GitHub CLI (gh) is required on PATH."
+}
+
+$runnerCliProbe = Test-RunnerCliAvailability
+if ($DispatchBackend -eq 'runner-cli' -and -not $runnerCliProbe.available) {
+  throw "Dispatch backend 'runner-cli' requested but runner-cli is not available on PATH."
+}
+
+if ($RunQueryBackend -eq 'runner-cli' -and -not $runnerCliProbe.available) {
+  throw "Run-query backend 'runner-cli' requested but runner-cli is not available on PATH."
 }
 
 $authProbe = Invoke-External -FilePath 'gh' -Arguments @('auth', 'status')
@@ -221,6 +463,20 @@ $normalizedWorkflowInputs = @(
     Sort-Object
 )
 
+$hasConsumerRefInput = @($normalizedWorkflowInputs | Where-Object {
+  $entry = [string]$_
+  if (-not $entry.Contains('=')) {
+    return $false
+  }
+
+  $key = ($entry -split '=', 2)[0].Trim().ToLowerInvariant()
+  return $key -eq 'consumer_ref'
+}).Count -gt 0
+
+if (-not $hasConsumerRefInput) {
+  $normalizedWorkflowInputs += 'consumer_ref=develop'
+}
+
 $cycle = 0
 while ($true) {
   $cycle += 1
@@ -239,6 +495,10 @@ while ($true) {
     }
     workflow_run = [ordered]@{
       dispatched = $false
+      dispatch_response = [ordered]@{
+        exit_code = $null
+        output_preview = @()
+      }
       run_id = $null
       url = $null
       status = $null
@@ -276,38 +536,27 @@ while ($true) {
     }
   }
 
-  $dispatchArgs = @('workflow', 'run', $WorkflowFile, '--ref', $Branch)
+  $headProbe = Invoke-External -FilePath 'git' -Arguments @('rev-parse', 'HEAD')
+  $expectedHeadSha = if ($headProbe.ExitCode -eq 0) { (($headProbe.Output -join "`n").Trim()) } else { '' }
   foreach ($pair in $normalizedWorkflowInputs) {
     if ([string]::IsNullOrWhiteSpace($pair) -or -not $pair.Contains('=')) {
       throw "Invalid -WorkflowInput '$pair'. Expected format key=value."
     }
-
-    $dispatchArgs += @('-f', $pair)
   }
 
-  $dispatch = Invoke-External -FilePath 'gh' -Arguments $dispatchArgs
-  if ($dispatch.ExitCode -ne 0) {
-    $dispatchOutput = $dispatch.Output -join "`n"
-    throw "Workflow dispatch failed: $dispatchOutput"
-  }
+  $dispatch = Invoke-WorkflowDispatch -Backend $DispatchBackend -WorkflowFile $WorkflowFile -Branch $Branch -Inputs $normalizedWorkflowInputs -RunnerCliAvailable ([bool]$runnerCliProbe.available)
+  $record.workflow_run.dispatch_response.exit_code = [int]$dispatch.exit_code
+  $record.workflow_run.dispatch_response.output_preview = @($dispatch.output_preview)
+  $record.workflow_run.dispatch_response.method = [string]$dispatch.method
 
   $record.workflow_run.dispatched = $true
+  $record.workflow_run.head_sha_expected = $expectedHeadSha
 
-  Start-Sleep -Seconds 5
-  $latestArgs = @('run', 'list', '--workflow', $WorkflowFile, '--branch', $Branch, '--limit', '1', '--json', 'databaseId,url,status,conclusion,createdAt,headSha')
-  $latest = Invoke-External -FilePath 'gh' -Arguments $latestArgs
-  if ($latest.ExitCode -ne 0) {
-    throw "Unable to resolve latest workflow run."
-  }
-
-  $latestJson = ($latest.Output -join "`n") | ConvertFrom-Json
-  if (-not $latestJson -or $latestJson.Count -lt 1) {
-    throw "No workflow run found after dispatch."
-  }
-
-  $runId = [long]$latestJson[0].databaseId
+  $resolvedRunMeta = Resolve-DispatchedRunMeta -WorkflowFile $WorkflowFile -Branch $Branch -StartedUtc $startedUtc -ExpectedHeadSha $expectedHeadSha -RunQueryBackend $RunQueryBackend -RunnerCliAvailable ([bool]$runnerCliProbe.available) -PollSeconds $PollSeconds
+  $runId = [long]$resolvedRunMeta.run_id
   $record.workflow_run.run_id = $runId
-  $record.workflow_run.url = [string]$latestJson[0].url
+  $record.workflow_run.url = [string]$resolvedRunMeta.url
+  $record.workflow_run.head_sha_actual = [string]$resolvedRunMeta.head_sha
 
   while ($true) {
     $runApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/$runId")
@@ -351,6 +600,7 @@ while ($true) {
   $summary = [pscustomobject]@{
     cycle = $record.cycle
     run_id = $record.workflow_run.run_id
+    dispatch_exit_code = $record.workflow_run.dispatch_response.exit_code
     status = $record.workflow_run.status
     conclusion = $record.workflow_run.conclusion
     failed_jobs = @($record.workflow_run.failed_jobs).Count

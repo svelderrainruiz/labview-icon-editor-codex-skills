@@ -30,10 +30,47 @@ param(
   [string]$GitHubToken,
 
   [Parameter(Mandatory = $false)]
-  [switch]$DryRun
+  [switch]$DryRun,
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet('auto', 'runner-cli', 'gh', 'rest')]
+  [string]$DispatchBackend = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Invoke-External {
+  param(
+    [Parameter(Mandatory)]
+    [string]$FilePath,
+
+    [Parameter(Mandatory)]
+    [string[]]$Arguments
+  )
+
+  try {
+    $output = & $FilePath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  }
+  catch {
+    $output = @($_.Exception.Message)
+    $exitCode = 127
+  }
+
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = @($output)
+  }
+}
+
+function Test-RunnerCliAvailability {
+  $probe = Invoke-External -FilePath 'runner-cli' -Arguments @('--version')
+  return [pscustomobject]@{
+    available = ($probe.ExitCode -eq 0)
+    exit_code = [int]$probe.ExitCode
+    output = @($probe.Output)
+  }
+}
 
 function Get-RunSnapshot {
   param(
@@ -157,52 +194,99 @@ function Dispatch-ReleaseWorkflow {
     [string]$ConsumerSha,
     [bool]$DispatchRunSelfHosted,
     [bool]$DispatchRunBuildSpec,
-    [string]$TokenOverride
+    [string]$TokenOverride,
+    [ValidateSet('auto', 'runner-cli', 'gh', 'rest')]
+    [string]$Backend,
+    [bool]$RunnerCliAvailable
   )
 
-  $gh = Get-Command gh -ErrorAction SilentlyContinue
-  if ($gh) {
-    & gh workflow run release-skill-layer.yml `
-      --repo $Repo `
-      --ref $Ref `
-      -f "release_tag=$Tag" `
-      -f "consumer_repo=$ConsumerRepo" `
-      -f "consumer_ref=$ConsumerRef" `
-      -f "consumer_sha=$ConsumerSha" `
-      -f "run_self_hosted=$($DispatchRunSelfHosted.ToString().ToLowerInvariant())" `
-      -f "run_build_spec=$($DispatchRunBuildSpec.ToString().ToLowerInvariant())"
+  $runnerArgs = @(
+    'github', 'workflow', 'dispatch',
+    '--repo', $Repo,
+    '--workflow', 'release-skill-layer.yml',
+    '--ref', $Ref,
+    '--field', "release_tag=$Tag",
+    '--field', "consumer_repo=$ConsumerRepo",
+    '--field', "consumer_ref=$ConsumerRef",
+    '--field', "consumer_sha=$ConsumerSha",
+    '--field', "run_self_hosted=$($DispatchRunSelfHosted.ToString().ToLowerInvariant())",
+    '--field', "run_build_spec=$($DispatchRunBuildSpec.ToString().ToLowerInvariant())"
+  )
 
-    if ($LASTEXITCODE -eq 0) {
-      return [pscustomobject]@{ method = 'gh'; dispatched = $true }
+  $ghArgs = @(
+    'workflow', 'run', 'release-skill-layer.yml',
+    '--repo', $Repo,
+    '--ref', $Ref,
+    '-f', "release_tag=$Tag",
+    '-f', "consumer_repo=$ConsumerRepo",
+    '-f', "consumer_ref=$ConsumerRef",
+    '-f', "consumer_sha=$ConsumerSha",
+    '-f', "run_self_hosted=$($DispatchRunSelfHosted.ToString().ToLowerInvariant())",
+    '-f', "run_build_spec=$($DispatchRunBuildSpec.ToString().ToLowerInvariant())"
+  )
+
+  if ($Backend -eq 'runner-cli' -or ($Backend -eq 'auto' -and $RunnerCliAvailable)) {
+    if (-not $RunnerCliAvailable) {
+      throw "Dispatch backend 'runner-cli' requested but runner-cli is not available."
+    }
+
+    $runnerDispatch = Invoke-External -FilePath 'runner-cli' -Arguments $runnerArgs
+    if ($runnerDispatch.ExitCode -eq 0) {
+      return [pscustomobject]@{ method = 'runner-cli'; dispatched = $true }
+    }
+
+    if ($Backend -eq 'runner-cli') {
+      throw "Dispatch failed via runner-cli: $($runnerDispatch.Output -join "`n")"
     }
   }
 
-  $token = if ($TokenOverride) { $TokenOverride } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }
-  if ([string]::IsNullOrWhiteSpace($token)) {
-    throw 'Dispatch failed: no GH_TOKEN or GITHUB_TOKEN available and gh workflow dispatch failed/unavailable.'
-  }
+  if ($Backend -eq 'gh' -or $Backend -eq 'auto') {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) {
+      $ghDispatch = Invoke-External -FilePath 'gh' -Arguments $ghArgs
+      if ($ghDispatch.ExitCode -eq 0) {
+        return [pscustomobject]@{ method = 'gh'; dispatched = $true }
+      }
 
-  $headers = @{
-    Authorization = "Bearer $token"
-    Accept = 'application/vnd.github+json'
-    'X-GitHub-Api-Version' = '2022-11-28'
-    'User-Agent' = 'codex-orchestrator'
-  }
-
-  $body = @{
-    ref = $Ref
-    inputs = @{
-      release_tag = $Tag
-      consumer_repo = $ConsumerRepo
-      consumer_ref = $ConsumerRef
-      consumer_sha = $ConsumerSha
-      run_self_hosted = $DispatchRunSelfHosted.ToString().ToLowerInvariant()
-      run_build_spec = $DispatchRunBuildSpec.ToString().ToLowerInvariant()
+      if ($Backend -eq 'gh') {
+        throw "Dispatch failed via gh: $($ghDispatch.Output -join "`n")"
+      }
     }
-  } | ConvertTo-Json -Depth 5
+    elseif ($Backend -eq 'gh') {
+      throw 'Dispatch failed: gh is unavailable on PATH.'
+    }
+  }
 
-  Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$Repo/actions/workflows/release-skill-layer.yml/dispatches" -Headers $headers -Body $body -ContentType 'application/json'
-  return [pscustomobject]@{ method = 'rest'; dispatched = $true }
+  if ($Backend -eq 'rest' -or $Backend -eq 'auto') {
+    $token = if ($TokenOverride) { $TokenOverride } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }
+    if ([string]::IsNullOrWhiteSpace($token)) {
+      throw 'Dispatch failed: no GH_TOKEN or GITHUB_TOKEN available for REST dispatch fallback.'
+    }
+
+    $headers = @{
+      Authorization = "Bearer $token"
+      Accept = 'application/vnd.github+json'
+      'X-GitHub-Api-Version' = '2022-11-28'
+      'User-Agent' = 'codex-orchestrator'
+    }
+
+    $body = @{
+      ref = $Ref
+      inputs = @{
+        release_tag = $Tag
+        consumer_repo = $ConsumerRepo
+        consumer_ref = $ConsumerRef
+        consumer_sha = $ConsumerSha
+        run_self_hosted = $DispatchRunSelfHosted.ToString().ToLowerInvariant()
+        run_build_spec = $DispatchRunBuildSpec.ToString().ToLowerInvariant()
+      }
+    } | ConvertTo-Json -Depth 5
+
+    Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$Repo/actions/workflows/release-skill-layer.yml/dispatches" -Headers $headers -Body $body -ContentType 'application/json'
+    return [pscustomobject]@{ method = 'rest'; dispatched = $true }
+  }
+
+  throw "Unsupported dispatch backend: $Backend"
 }
 
 function Write-DispatchResult {
@@ -316,6 +400,11 @@ if (-not $isGo) {
 
 $skillRepoResolved = Get-SkillRepo
 $orchestratorRef = Get-OrchestratorRef
+$runnerCliProbe = Test-RunnerCliAvailability
+
+if ($DispatchBackend -eq 'runner-cli' -and -not $runnerCliProbe.available) {
+  throw "Dispatch backend 'runner-cli' requested but runner-cli is not available on PATH."
+}
 
 if ($DryRun) {
   $dryPayload = [pscustomobject]@{
@@ -347,7 +436,9 @@ $dispatchResult = Dispatch-ReleaseWorkflow `
   -ConsumerSha $snapshot.run.head_sha `
   -DispatchRunSelfHosted:$RunSelfHosted `
   -DispatchRunBuildSpec:$RunBuildSpec `
-  -TokenOverride $GitHubToken
+  -TokenOverride $GitHubToken `
+  -Backend $DispatchBackend `
+  -RunnerCliAvailable ([bool]$runnerCliProbe.available)
 
 Update-PlanDispatchSection -Path $PlanPath -Tag $ReleaseTag -Dispatched:$true -StatePath $releaseStatePath -DispatchPath $dispatchResultPath
 
