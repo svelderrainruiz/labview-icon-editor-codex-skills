@@ -23,6 +23,14 @@ on:
         required: true
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
+      windows_build_lane:
+        description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
+        required: true
+        default: windows-hosted
+        type: choice
+        options:
+          - linux-container
+          - windows-hosted
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
         required: false
@@ -76,6 +84,11 @@ on:
         required: false
         default: true
         type: boolean
+      labview_community_edition:
+        description: Enable LabVIEW Community Edition environment for Linux container runs.
+        required: false
+        default: true
+        type: boolean
   workflow_call:
     inputs:
       consumer_repo:
@@ -97,6 +110,11 @@ on:
         description: Linux NI LabVIEW Docker image used to build Linux PPL and VI package.
         required: false
         default: nationalinstruments/labview:2026q1-linux-pwsh
+        type: string
+      windows_build_lane:
+        description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
+        required: false
+        default: windows-hosted
         type: string
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
@@ -148,6 +166,11 @@ on:
         required: false
         default: true
         type: boolean
+      labview_community_edition:
+        description: Enable LabVIEW Community Edition environment for Linux container runs.
+        required: false
+        default: true
+        type: boolean
     outputs:
       windows_ppl_artifact_name:
         description: Name of the uploaded Windows PPL bundle artifact.
@@ -167,7 +190,7 @@ permissions:
 
 jobs:
   build-ppl-windows:
-    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    runs-on: ${{ inputs.windows_build_lane == 'windows-hosted' && 'windows-latest' || 'ubuntu-latest' }}
     outputs:
       ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
       artifact_name: ${{ steps.bundle.outputs.artifact_name }}
@@ -182,10 +205,50 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
+      - name: Build NI Linux image locally when needed
+        if: ${{ inputs.windows_build_lane == 'linux-container' }}
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
+
+      - name: Validate Windows PPL build prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.windows_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host 'windows_build_command provided; skipping default script-path validation.'
+            exit 0
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          if ('${{ inputs.windows_build_lane }}' -eq 'windows-hosted') {
+            $required = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-windows.ps1'
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Missing required consumer script '$required'. Provide inputs.windows_build_command or restore Tooling/container-parity assets in the consumer repo."
+            }
+          }
+          else {
+            $requiredLinux = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-linux.sh'
+            $requiredDevMode = Join-Path $consumerWorkspace 'Tooling/container-parity/devmode-linux.sh'
+            if (-not (Test-Path -LiteralPath $requiredLinux -PathType Leaf) -or -not (Test-Path -LiteralPath $requiredDevMode -PathType Leaf)) {
+              throw "Missing required consumer scripts '$requiredLinux' and/or '$requiredDevMode'. Provide inputs.windows_build_command or restore Tooling/container-parity assets in the consumer repo."
+            }
+          }
+
       - name: Build Windows PPL in NI Windows container
         shell: pwsh
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
         run: |
           $ErrorActionPreference = 'Stop'
           $windowsPplOutputRelativePath = '${{ inputs.windows_ppl_output_path }}'
@@ -203,7 +266,7 @@ jobs:
             Write-Host $customCommand
             Invoke-Expression $customCommand
           }
-          else {
+          elseif ('${{ inputs.windows_build_lane }}' -eq 'windows-hosted') {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:C:\workspace" `
@@ -223,6 +286,28 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:WINDOWS_LABVIEW_IMAGE" `
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+          }
+          else {
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:/workspace" `
+              -w /workspace `
+              -e "LVIE_REPO_ROOT=/workspace" `
+              -e "WORKSPACE_ROOT=/workspace" `
+              -e "REPO_ROOT=/workspace" `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test/Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$($windowsPplOutputRelativePath -replace '\\', '/')" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              "$env:LINUX_LABVIEW_IMAGE" `
+              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
           }
 
           if ($LASTEXITCODE -ne 0) {
@@ -283,6 +368,36 @@ jobs:
           repository: ${{ inputs.consumer_repo }}
           ref: ${{ inputs.consumer_ref }}
           path: consumer
+
+      - name: Build NI Linux image locally when needed
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
+
+      - name: Validate Linux PPL build prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $customCommand = @'
+          ${{ inputs.linux_build_command }}
+          '@.Trim()
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host 'linux_build_command provided; skipping default script-path validation.'
+            exit 0
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredLinux = Join-Path $consumerWorkspace 'Tooling/container-parity/runlabview-linux.sh'
+          $requiredDevMode = Join-Path $consumerWorkspace 'Tooling/container-parity/devmode-linux.sh'
+          if (-not (Test-Path -LiteralPath $requiredLinux -PathType Leaf) -or -not (Test-Path -LiteralPath $requiredDevMode -PathType Leaf)) {
+            throw "Missing required consumer scripts '$requiredLinux' and/or '$requiredDevMode'. Provide inputs.linux_build_command or restore Tooling/container-parity assets in the consumer repo."
+          }
 
       - name: Build Linux PPL in NI Linux container
         shell: pwsh
@@ -389,6 +504,16 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
+      - name: Build NI Linux image locally when needed
+        shell: bash
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+          fi
+
       - name: Download Windows PPL handoff artifact
         uses: actions/download-artifact@v4
         with:
@@ -433,6 +558,7 @@ jobs:
         shell: bash
         env:
           VIPM_COMMUNITY_EDITION: ${{ inputs.vipm_community_edition }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
           VIPM_PROJECT_PATH: ${{ inputs.vipm_project_path }}
         run: |
@@ -440,17 +566,59 @@ jobs:
 
           vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
 
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            pull_output=""
+            if ! pull_output="$(docker pull "$LINUX_LABVIEW_IMAGE" 2>&1)"; then
+              echo "Preflight: unable to pull Linux image '$LINUX_LABVIEW_IMAGE'." >&2
+              echo "$pull_output" | tail -n 40 >&2
+              dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
+              if [[ -f "$dockerfile_path" ]]; then
+                echo "Preflight: pull failed; attempting local build from $dockerfile_path" >&2
+                echo "Fallback build note: VIPM is not provisioned unless present in base image or the fallback image is built with VIPM_CLI_URL/VIPM_CLI_SHA256." >&2
+                if ! docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
+                  echo "Unable to pull/build Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                  echo "Ensure the image exists, base image access is configured, or runner auth is available." >&2
+                  exit 1
+                fi
+              else
+                echo "Unable to pull Linux image and local Dockerfile not found: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
+            fi
+          fi
+
           docker run --rm \
             -v "$GITHUB_WORKSPACE/consumer:/workspace" \
             -w /workspace \
             -e VIPM_COMMUNITY_EDITION="$VIPM_COMMUNITY_EDITION" \
+            -e LABVIEW_COMMUNITY_EDITION="$LABVIEW_COMMUNITY_EDITION" \
             -e VIPM_PROJECT_PATH_IN_CONTAINER="$vipm_project_path_in_container" \
             -e LINUX_LABVIEW_IMAGE="$LINUX_LABVIEW_IMAGE" \
             "$LINUX_LABVIEW_IMAGE" \
             bash -lc '
               set -euo pipefail
-              if ! command -v vipm >/dev/null 2>&1; then
+
+              resolve_vipm() {
+                if command -v vipm >/dev/null 2>&1; then
+                  return 0
+                fi
+
+                vipm_candidate="$(find /usr/local/bin /usr/bin /opt /usr/local/natinst -maxdepth 6 -type f -name vipm -perm -111 2>/dev/null | head -n 1 || true)"
+                if [[ -n "$vipm_candidate" ]]; then
+                  export PATH="$(dirname "$vipm_candidate"):$PATH"
+                  echo "vipm candidate discovered at: $vipm_candidate" >&2
+                fi
+
+                command -v vipm >/dev/null 2>&1
+              }
+
+              if ! resolve_vipm; then
                 echo "vipm is not available on PATH inside Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                echo "PATH=$PATH" >&2
+                echo "vipm lookup: $(command -v vipm || echo not-found)" >&2
+                echo "vipm search roots: /usr/local/bin /usr/bin /opt /usr/local/natinst" >&2
+                echo "To triage deterministically, rebuild with VIPM CLI args:" >&2
+                echo "  docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL --build-arg VIPM_CLI_SHA256=SHA256 --build-arg VIPM_CLI_ARCHIVE_TYPE=tar.gz -t $LINUX_LABVIEW_IMAGE -f docker/ni-lv-pwsh.Dockerfile ." >&2
                 exit 1
               fi
 

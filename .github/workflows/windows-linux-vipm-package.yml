@@ -36,15 +36,30 @@ on:
         required: false
         default: ''
         type: string
+      linux_build_command:
+        description: Optional custom command executed for Linux PPL build. Leave blank to use built-in container parity command.
+        required: false
+        default: ''
+        type: string
       windows_ppl_path:
         description: Relative path to the built PPL produced by the Windows step.
         required: true
         default: consumer/resource/plugins/lv_icon.lvlibp
         type: string
-      linux_ppl_target_path:
-        description: Relative path where Linux packaging expects the PPL.
+      linux_ppl_path:
+        description: Relative path to the built PPL produced by the Linux step.
         required: true
         default: consumer/resource/plugins/lv_icon.lvlibp
+        type: string
+      linux_ppl_target_path:
+        description: Relative path where Linux packaging installs the Windows-built PPL.
+        required: true
+        default: consumer/resource/plugins/lv_icon.lvlibp
+        type: string
+      linux_consume_linux_ppl_path:
+        description: Relative path where Linux packaging installs the Linux-built PPL.
+        required: true
+        default: consumer/resource/plugins/lv_icon.linux.lvlibp
         type: string
       vipm_project_path:
         description: Relative path to .vipb (or project path accepted by vipm build).
@@ -69,6 +84,30 @@ on:
         required: false
         default: true
         type: boolean
+      labview_community_edition:
+        description: Enable LabVIEW Community Edition mode inside Linux containers.
+        required: false
+        default: true
+        type: boolean
+      vipm_cli_url:
+        description: Optional URL for VIPM CLI archive used when building linux_labview_image locally.
+        required: false
+        default: ''
+        type: string
+      vipm_cli_sha256:
+        description: Optional SHA256 for VIPM CLI archive (required with vipm_cli_url).
+        required: false
+        default: ''
+        type: string
+      vipm_cli_archive_type:
+        description: VIPM CLI archive type when vipm_cli_url is provided.
+        required: false
+        default: tar.gz
+        type: choice
+        options:
+          - tar.gz
+          - tgz
+          - zip
 
 permissions:
   contents: read
@@ -90,16 +129,43 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
+      - name: Preflight Linux container parity assets
+        if: ${{ inputs.ppl_build_lane == 'linux-container' && inputs.windows_build_command == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/consumer/Tooling/container-parity"
+          run_script="$root/runlabview-linux.sh"
+          dev_script="$root/devmode-linux.sh"
+
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer checkout." >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: use a consumer_ref that contains Tooling/container-parity files." >&2
+            ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
+            exit 1
+          fi
+
       - name: Build PPL in Windows image
         shell: pwsh
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
+          VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
+          VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
+          VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
         run: |
           $ErrorActionPreference = 'Stop'
           $customCommand = @'
           ${{ inputs.windows_build_command }}
           '@.Trim()
+          $buildExitCode = 0
+
+          if ((-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) -xor (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_SHA256))) {
+            throw "inputs.vipm_cli_url and inputs.vipm_cli_sha256 must be provided together."
+          }
 
           if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
             Write-Host "Executing custom windows_build_command:"
@@ -107,6 +173,15 @@ jobs:
             Invoke-Expression $customCommand
           }
           elseif ('${{ inputs.ppl_build_lane }}' -eq 'windows-container') {
+            Write-Host "Preflight: validating Windows LabVIEW image '$env:WINDOWS_LABVIEW_IMAGE'"
+            docker image inspect "$env:WINDOWS_LABVIEW_IMAGE" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              docker pull "$env:WINDOWS_LABVIEW_IMAGE"
+            }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to pull/access Windows LabVIEW image '$env:WINDOWS_LABVIEW_IMAGE'. Ensure the image exists and runner authentication is configured."
+            }
+
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:C:\workspace" `
@@ -126,8 +201,36 @@ jobs:
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:WINDOWS_LABVIEW_IMAGE" `
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+            $buildExitCode = $LASTEXITCODE
           }
           else {
+            Write-Host "Preflight: validating Linux LabVIEW image '$env:LINUX_LABVIEW_IMAGE'"
+            docker image inspect "$env:LINUX_LABVIEW_IMAGE" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              docker pull "$env:LINUX_LABVIEW_IMAGE"
+            }
+            if ($LASTEXITCODE -ne 0) {
+              $dockerfilePath = Join-Path $env:GITHUB_WORKSPACE 'docker/ni-lv-pwsh.Dockerfile'
+              if (Test-Path -LiteralPath $dockerfilePath -PathType Leaf) {
+                Write-Host "Preflight: pull failed; attempting local build from '$dockerfilePath'"
+                $dockerBuildArgs = @()
+                if (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) {
+                  $archiveType = if ([string]::IsNullOrWhiteSpace($env:VIPM_CLI_ARCHIVE_TYPE)) { 'tar.gz' } else { $env:VIPM_CLI_ARCHIVE_TYPE }
+                  $dockerBuildArgs += @(
+                    '--build-arg', "VIPM_CLI_URL=$env:VIPM_CLI_URL",
+                    '--build-arg', "VIPM_CLI_SHA256=$env:VIPM_CLI_SHA256",
+                    '--build-arg', "VIPM_CLI_ARCHIVE_TYPE=$archiveType"
+                  )
+                }
+
+                $dockerBuildArgs += @('-t', "$env:LINUX_LABVIEW_IMAGE", '-f', "$dockerfilePath", "$env:GITHUB_WORKSPACE")
+                docker build @dockerBuildArgs
+              }
+            }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to pull/build Linux LabVIEW image '$env:LINUX_LABVIEW_IMAGE'. Ensure the image exists, base image access is configured, or runner authentication is available."
+            }
+
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:/workspace" `
@@ -146,16 +249,18 @@ jobs:
               -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
               -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.lvlibp" `
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              -e "LABVIEW_COMMUNITY_EDITION=$env:LABVIEW_COMMUNITY_EDITION" `
               "$env:LINUX_LABVIEW_IMAGE" `
-              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
+              bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
+            $buildExitCode = $LASTEXITCODE
           }
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          if ($buildExitCode -ne 0) {
+            throw "Windows PPL build command failed with exit code $buildExitCode"
           }
 
       - id: bundle
-        name: Create PPL handoff bundle
+        name: Create Windows PPL handoff bundle
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -164,7 +269,7 @@ jobs:
             throw "PPL output not found at '$pplPath'."
           }
 
-          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
           if (Test-Path -LiteralPath $bundleDir) {
             Remove-Item -LiteralPath $bundleDir -Recurse -Force
           }
@@ -181,20 +286,176 @@ jobs:
 
           $manifestPath = Join-Path $bundleDir 'ppl-manifest.json'
           $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
-          $artifactName = "ppl-bundle-$env:GITHUB_RUN_ID"
+          $artifactName = "ppl-bundle-windows-$env:GITHUB_RUN_ID"
 
           "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "ppl_sha256=$($manifest.ppl_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Upload PPL handoff artifact
+      - name: Upload Windows PPL handoff artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.bundle.outputs.artifact_name }}
-          path: ${{ runner.temp }}/ppl-bundle
+          path: ${{ runner.temp }}/ppl-bundle-windows
+          if-no-files-found: error
+
+  build-ppl-linux:
+    runs-on: ubuntu-latest
+    outputs:
+      ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
+      artifact_name: ${{ steps.bundle.outputs.artifact_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.consumer_repo }}
+          ref: ${{ inputs.consumer_ref }}
+          path: consumer
+
+      - name: Validate Linux container parity assets
+        if: ${{ inputs.linux_build_command == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/consumer/Tooling/container-parity"
+          run_script="$root/runlabview-linux.sh"
+          dev_script="$root/devmode-linux.sh"
+
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer checkout." >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: use a consumer_ref that contains Tooling/container-parity files or provide linux_build_command." >&2
+            ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
+            exit 1
+          fi
+
+      - name: Build Linux PPL in Linux image
+        shell: pwsh
+        env:
+          LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
+          VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
+          VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
+          VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $linuxPplOutputRelativePath = '${{ inputs.linux_ppl_path }}'
+          if ($linuxPplOutputRelativePath.StartsWith('consumer/')) {
+            $linuxPplOutputRelativePath = $linuxPplOutputRelativePath.Substring('consumer/'.Length)
+          }
+          $linuxPplOutputRelativePath = $linuxPplOutputRelativePath -replace '\\', '/'
+
+          $customCommand = @'
+          ${{ inputs.linux_build_command }}
+          '@.Trim()
+
+          if ((-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) -xor (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_SHA256))) {
+            throw "inputs.vipm_cli_url and inputs.vipm_cli_sha256 must be provided together."
+          }
+
+          docker image inspect "$env:LINUX_LABVIEW_IMAGE" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            docker pull "$env:LINUX_LABVIEW_IMAGE"
+          }
+          if ($LASTEXITCODE -ne 0) {
+            $dockerfilePath = Join-Path $env:GITHUB_WORKSPACE 'docker/ni-lv-pwsh.Dockerfile'
+            if (Test-Path -LiteralPath $dockerfilePath -PathType Leaf) {
+              Write-Host "Preflight: pull failed; attempting local build from '$dockerfilePath'"
+              $dockerBuildArgs = @()
+              if (-not [string]::IsNullOrWhiteSpace($env:VIPM_CLI_URL)) {
+                $archiveType = if ([string]::IsNullOrWhiteSpace($env:VIPM_CLI_ARCHIVE_TYPE)) { 'tar.gz' } else { $env:VIPM_CLI_ARCHIVE_TYPE }
+                $dockerBuildArgs += @(
+                  '--build-arg', "VIPM_CLI_URL=$env:VIPM_CLI_URL",
+                  '--build-arg', "VIPM_CLI_SHA256=$env:VIPM_CLI_SHA256",
+                  '--build-arg', "VIPM_CLI_ARCHIVE_TYPE=$archiveType"
+                )
+              }
+
+              $dockerBuildArgs += @('-t', "$env:LINUX_LABVIEW_IMAGE", '-f', "$dockerfilePath", "$env:GITHUB_WORKSPACE")
+              docker build @dockerBuildArgs
+            }
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to pull/build Linux LabVIEW image '$env:LINUX_LABVIEW_IMAGE'. Ensure the image exists, base image access is configured, or runner authentication is available."
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+            Write-Host "Executing custom linux_build_command:"
+            Write-Host $customCommand
+            Invoke-Expression $customCommand
+          }
+          else {
+            $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+            docker run --rm `
+              -v "${consumerWorkspace}:/workspace" `
+              -w /workspace `
+              -e "LVIE_REPO_ROOT=/workspace" `
+              -e "WORKSPACE_ROOT=/workspace" `
+              -e "REPO_ROOT=/workspace" `
+              -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+              -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+              -e "TARGET_DIR_REL=Test/Templates" `
+              -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+              -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+              -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+              -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplOutputRelativePath" `
+              -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              -e "LABVIEW_COMMUNITY_EDITION=$env:LABVIEW_COMMUNITY_EDITION" `
+              "$env:LINUX_LABVIEW_IMAGE" `
+              bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Linux PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+      - id: bundle
+        name: Create Linux PPL handoff bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_ppl_path }}'
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Linux PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion '${{ inputs.labview_version }}' `
+            -Bitness '${{ inputs.bitness }}' `
+            -WindowsImage '${{ inputs.linux_labview_image }}' `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+          $manifestPath = Join-Path $bundleDir 'ppl-manifest.json'
+          $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+          $artifactName = "ppl-bundle-linux-$env:GITHUB_RUN_ID"
+
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ppl_sha256=$($manifest.ppl_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload Linux PPL handoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
           if-no-files-found: error
 
   package-vip-linux:
-    needs: [build-ppl-windows]
+    needs: [build-ppl-windows, build-ppl-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -207,17 +468,23 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
-      - name: Download PPL handoff artifact
+      - name: Download Windows PPL handoff artifact
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build-ppl-windows.outputs.artifact_name }}
-          path: ${{ runner.temp }}/ppl-bundle
+          path: ${{ runner.temp }}/ppl-bundle-windows
+
+      - name: Download Linux PPL handoff artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-ppl-linux.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
 
       - name: Verify and install Windows-built PPL for Linux packaging
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
           $targetPplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_ppl_target_path }}'
 
           & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
@@ -227,28 +494,104 @@ jobs:
             -ExpectedBitness '${{ inputs.bitness }}' `
             -ExpectedSha256 '${{ needs.build-ppl-windows.outputs.ppl_sha256 }}'
 
+      - name: Verify and install Linux-built PPL for Linux packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          $targetPplPath = Join-Path $env:GITHUB_WORKSPACE '${{ inputs.linux_consume_linux_ppl_path }}'
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
+            -BundleDirectory $bundleDir `
+            -OutputPplPath $targetPplPath `
+            -ExpectedLabVIEWVersion '${{ inputs.labview_version }}' `
+            -ExpectedBitness '${{ inputs.bitness }}' `
+            -ExpectedSha256 '${{ needs.build-ppl-linux.outputs.ppl_sha256 }}'
+
       - name: Build VI Package in Linux image using consumed PPL
         shell: bash
         env:
           VIPM_COMMUNITY_EDITION: ${{ inputs.vipm_community_edition }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
           VIPM_PROJECT_PATH: ${{ inputs.vipm_project_path }}
+          VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
+          VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
+          VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
         run: |
           set -euo pipefail
 
           vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
 
+          if [[ -n "$VIPM_CLI_URL" || -n "$VIPM_CLI_SHA256" ]]; then
+            if [[ -z "$VIPM_CLI_URL" || -z "$VIPM_CLI_SHA256" ]]; then
+              echo "inputs.vipm_cli_url and inputs.vipm_cli_sha256 must be provided together." >&2
+              exit 1
+            fi
+          fi
+
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            pull_output=""
+            if ! pull_output="$(docker pull "$LINUX_LABVIEW_IMAGE" 2>&1)"; then
+              echo "Preflight: unable to pull Linux image '$LINUX_LABVIEW_IMAGE'." >&2
+              echo "$pull_output" | tail -n 40 >&2
+              dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
+              if [[ -f "$dockerfile_path" ]]; then
+                echo "Preflight: pull failed; attempting local build from $dockerfile_path" >&2
+                build_args=()
+                if [[ -n "$VIPM_CLI_URL" ]]; then
+                  archive_type="${VIPM_CLI_ARCHIVE_TYPE:-tar.gz}"
+                  build_args+=(--build-arg "VIPM_CLI_URL=$VIPM_CLI_URL")
+                  build_args+=(--build-arg "VIPM_CLI_SHA256=$VIPM_CLI_SHA256")
+                  build_args+=(--build-arg "VIPM_CLI_ARCHIVE_TYPE=$archive_type")
+                else
+                  echo "Fallback build note: VIPM is not provisioned unless present in base image or VIPM_CLI_URL/VIPM_CLI_SHA256 are provided." >&2
+                fi
+
+                if ! docker build "${build_args[@]}" -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
+                  echo "Unable to pull/build Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                  echo "Ensure the image exists, base image access is configured, or runner auth is available." >&2
+                  exit 1
+                fi
+              else
+                echo "Unable to pull Linux image and local Dockerfile not found: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
+            fi
+          fi
+
           docker run --rm \
             -v "$GITHUB_WORKSPACE/consumer:/workspace" \
             -w /workspace \
             -e VIPM_COMMUNITY_EDITION="$VIPM_COMMUNITY_EDITION" \
+            -e LABVIEW_COMMUNITY_EDITION="$LABVIEW_COMMUNITY_EDITION" \
             -e VIPM_PROJECT_PATH_IN_CONTAINER="$vipm_project_path_in_container" \
             -e LINUX_LABVIEW_IMAGE="$LINUX_LABVIEW_IMAGE" \
             "$LINUX_LABVIEW_IMAGE" \
             bash -lc '
               set -euo pipefail
-              if ! command -v vipm >/dev/null 2>&1; then
+
+              resolve_vipm() {
+                if command -v vipm >/dev/null 2>&1; then
+                  return 0
+                fi
+
+                vipm_candidate="$(find /usr/local/bin /usr/bin /opt /usr/local/natinst -maxdepth 6 -type f -name vipm -perm -111 2>/dev/null | head -n 1 || true)"
+                if [[ -n "$vipm_candidate" ]]; then
+                  export PATH="$(dirname "$vipm_candidate"):$PATH"
+                  echo "vipm candidate discovered at: $vipm_candidate" >&2
+                fi
+
+                command -v vipm >/dev/null 2>&1
+              }
+
+              if ! resolve_vipm; then
                 echo "vipm is not available on PATH inside Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                echo "PATH=$PATH" >&2
+                echo "vipm lookup: $(command -v vipm || echo not-found)" >&2
+                echo "vipm search roots: /usr/local/bin /usr/bin /opt /usr/local/natinst" >&2
+                echo "To triage deterministically, rebuild with VIPM CLI args:" >&2
+                echo "  docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL --build-arg VIPM_CLI_SHA256=SHA256 --build-arg VIPM_CLI_ARCHIVE_TYPE=tar.gz -t $LINUX_LABVIEW_IMAGE -f docker/ni-lv-pwsh.Dockerfile ." >&2
                 exit 1
               fi
 

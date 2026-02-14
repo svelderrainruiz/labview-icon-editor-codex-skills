@@ -84,8 +84,14 @@ Installer contract:
 
 ### Optional override inputs
 - `windows_build_command`: custom command for Windows PPL build. Leave blank to use built-in container parity command.
+- `linux_build_command`: custom command for Linux PPL build. Leave blank to use built-in container parity command.
 - `windows_ppl_path`: path to generated PPL in workspace.
+- `linux_ppl_path`: path to generated Linux PPL in workspace.
+- `linux_consume_linux_ppl_path`: target path where Linux packaging installs Linux-built PPL.
 - `vipm_project_path`: path to `.vipb` (or path accepted by `vipm build`).
+- `vipm_cli_url` + `vipm_cli_sha256`: optional VIPM CLI archive source/checksum used when workflow must build `linux_labview_image` locally.
+- `vipm_cli_archive_type`: archive type for `vipm_cli_url` (`tar.gz`/`tgz`/`zip`; default `tar.gz`).
+- `labview_community_edition`: enables LabVIEW Community Edition mode in Linux container runs (default `true`).
 
 ### Typical dispatch values
 - `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`
@@ -94,12 +100,33 @@ Installer contract:
 - `consumer_ref`: `main` (or release branch/SHA)
 - `windows_build_command`: `` (empty => auto build command)
 - `windows_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
+- `linux_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
 - `linux_ppl_target_path`: `consumer/resource/plugins/lv_icon.lvlibp`
+- `linux_consume_linux_ppl_path`: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - `vipm_project_path`: `consumer/Tooling/deployment/NI Icon editor.vipb`
 - `labview_version`: `2026`
 - `bitness`: `64`
 
 ### Notes
 - If your Windows host only supports Docker Linux containers, set `ppl_build_lane=linux-container` (default).
+- Workflow runs `build-ppl-windows` and `build-ppl-linux` in parallel, then packages using both consumed bundles (release-prep alignment).
 - Linux stage fails fast if `vipm` is not available in the selected Linux image.
 - If `vipm_community_edition=true`, Linux stage runs `vipm activate` before `vipm build`.
+- Local fast-triage helper for the Linux packaging step:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PackageVipLinuxLocal.ps1`
+  - Optional overrides: `-LinuxLabviewImage`, `-ConsumerPath`, `-VipmProjectPath`, `-VipmCommunityEdition:$false`
+
+## Autonomous CI loop
+- Continuous autonomous branch integration helper:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1`
+- Typical bounded smoke run (1 cycle, stop on failure):
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
+- Pass workflow dispatch inputs (`key=value`) repeatedly:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=main"`
+- Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
+  - Profile injects both `windows_build_command` and `linux_build_command` stubs so parallel PPL jobs can complete without consumer parity scripts.
+- Remediation mode with VIPM CLI injection during image fallback builds:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux -VipmCliUrl "<artifact-url>" -VipmCliSha256 "<sha256>" -VipmCliArchiveType tar.gz`
+- Optional JSONL log output:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
