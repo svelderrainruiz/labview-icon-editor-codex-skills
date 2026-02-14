@@ -35,9 +35,18 @@ Installer contract:
 
 ## Docker CI
 - Workflow: `.github/workflows/docker-contract-ci.yml`
-- Purpose: run repository contract tests (`tests/*.Tests.ps1`) inside Docker.
+- Purpose: run repository contract tests inside Docker and build/publish a Linux PPL bundle artifact.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
+- PPL source contract (docker-contract-ci lane):
+  - consumer repo: `svelderrainruiz/labview-icon-editor`
+  - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
+  - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
+  - output path: `consumer/resource/plugins/lv_icon.lvlibp`
+- Published artifact:
+  - `docker-contract-ppl-bundle-linux-<run_id>` containing:
+    - `lv_icon.lvlibp`
+    - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
 - Local run (NI LabVIEW Linux image already on this machine):

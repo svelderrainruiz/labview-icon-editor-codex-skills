@@ -20,6 +20,14 @@ permissions:
 jobs:
   docker-contract-ci:
     runs-on: ubuntu-latest
+    env:
+      CONSUMER_REPO: svelderrainruiz/labview-icon-editor
+      CONSUMER_REF: patch/456-2020-migration-branch-from-9e46ecf
+      CONSUMER_EXPECTED_SHA: 9e46ecf591bc36afca8ddf4ce688a5f58604a12a
+      LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
+      LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.lvlibp
+      LABVIEW_VERSION: '2026'
+      BITNESS: '64'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,11 +43,135 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build -t nationalinstruments/labview:2026q1-linux-pwsh -f docker/ni-lv-pwsh.Dockerfile .
+          docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
 
       - name: Run VIPM activation contract tests on NI image
         shell: pwsh
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
-            -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' `
+            -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - name: Validate Linux container parity assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/consumer/Tooling/container-parity"
+          run_script="$root/runlabview-linux.sh"
+          dev_script="$root/devmode-linux.sh"
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer repo:" >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+            ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
+            exit 127
+          fi
+
+      - name: Build Linux PPL in NI Linux container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $linuxPplOutputRelativePath = $env:LINUX_PPL_OUTPUT_PATH
+          if ($linuxPplOutputRelativePath.StartsWith('consumer/')) {
+            $linuxPplOutputRelativePath = $linuxPplOutputRelativePath.Substring('consumer/'.Length)
+          }
+          $linuxPplOutputRelativePath = $linuxPplOutputRelativePath -replace '\\', '/'
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $linuxContainerParityCommand = @'
+          set -euo pipefail
+          script_dir=/workspace/Tooling/container-parity
+          run_script="$script_dir/runlabview-linux.sh"
+          dev_script="$script_dir/devmode-linux.sh"
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer repo:" >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+            ls -la /workspace/Tooling >&2 || true
+            exit 127
+          fi
+          tmp_script_dir="$(mktemp -d)"
+          cleanup() { rm -rf "$tmp_script_dir"; }
+          trap cleanup EXIT
+          cp -a "$script_dir/." "$tmp_script_dir/"
+          while IFS= read -r -d '' script_file; do
+            sed -i 's/\r$//' "$script_file"
+          done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
+          chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
+          "$tmp_script_dir/runlabview-linux.sh"
+'@
+
+          docker run --rm `
+            -v "${consumerWorkspace}:/workspace" `
+            -w /workspace `
+            -e "LVIE_REPO_ROOT=/workspace" `
+            -e "WORKSPACE_ROOT=/workspace" `
+            -e "REPO_ROOT=/workspace" `
+            -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+            -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+            -e "TARGET_DIR_REL=Test/Templates" `
+            -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+            -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+            -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+            -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplOutputRelativePath" `
+            -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
+            -e "LABVIEW_COMMUNITY_EDITION=true" `
+            "$env:LINUX_LABVIEW_IMAGE" `
+            bash -lc $linuxContainerParityCommand
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Linux PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Create Linux PPL bundle manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE $env:LINUX_PPL_OUTPUT_PATH
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Linux PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion $env:LABVIEW_VERSION `
+            -Bitness $env:BITNESS `
+            -WindowsImage $env:LINUX_LABVIEW_IMAGE `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+      - name: Upload Linux PPL bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-linux-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
+          if-no-files-found: error
