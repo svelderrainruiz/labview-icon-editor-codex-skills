@@ -23,6 +23,7 @@ Describe 'Local package-vip-linux helper contract' {
 
     It 'runs docker with workflow-aligned environment variables' {
         $script:helperContent | Should -Match 'VIPM_COMMUNITY_EDITION='
+        $script:helperContent | Should -Match 'LABVIEW_COMMUNITY_EDITION='
         $script:helperContent | Should -Match 'VIPM_PROJECT_PATH_IN_CONTAINER='
         $script:helperContent | Should -Match 'LINUX_LABVIEW_IMAGE='
         $script:helperContent | Should -Match "'bash',\s*'-lc'"
@@ -31,7 +32,8 @@ Describe 'Local package-vip-linux helper contract' {
     It 'emits actionable diagnostics when vipm is missing' {
         $script:helperContent | Should -Match 'vipm is not available on PATH inside Linux image'
         $script:helperContent | Should -Match 'PATH=\$PATH'
-        $script:helperContent | Should -Match "vipm lookup: \$\(command -v vipm \|\| echo 'not-found'\)"
+        $script:helperContent | Should -Match "vipm lookup: \$\(command -v vipm \|\| echo not-found\)"
+        $script:helperContent | Should -Match 'vipm search roots: /usr/local/bin /usr/bin /opt /usr/local/natinst'
         $script:helperContent | Should -Match 'docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL'
         $script:helperContent | Should -Match '--build-arg VIPM_CLI_SHA256=SHA256'
     }
