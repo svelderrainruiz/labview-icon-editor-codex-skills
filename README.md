@@ -132,3 +132,4 @@ Installer contract:
 - Optional JSONL log output:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
   - Each cycle now records `workflow_run.vipm_help_preview` with `observed`, `usage_line_observed`, `source`, and `check_error`.
+  - Run correlation is pinned to dispatch time plus expected `HEAD` SHA to avoid selecting a different concurrent run on the same branch.

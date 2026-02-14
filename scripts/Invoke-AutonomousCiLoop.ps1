@@ -167,6 +167,81 @@ function Get-VipmHelpPreviewEvidence {
   }
 }
 
+function Resolve-DispatchedRunMeta {
+  param(
+    [Parameter(Mandatory)]
+    [string]$WorkflowFile,
+
+    [Parameter(Mandatory)]
+    [string]$Branch,
+
+    [Parameter(Mandatory)]
+    [datetime]$StartedUtc,
+
+    [Parameter()]
+    [AllowNull()]
+    [string]$ExpectedHeadSha,
+
+    [Parameter(Mandatory)]
+    [int]$PollSeconds
+  )
+
+  $attempt = 0
+  $maxAttempts = 30
+  while ($attempt -lt $maxAttempts) {
+    $attempt += 1
+    $listArgs = @('run', 'list', '--workflow', $WorkflowFile, '--branch', $Branch, '--limit', '20', '--json', 'databaseId,url,status,conclusion,createdAt,headSha,event')
+    $listProbe = Invoke-External -FilePath 'gh' -Arguments $listArgs
+    if ($listProbe.ExitCode -eq 0) {
+      $runs = @(($listProbe.Output -join "`n") | ConvertFrom-Json)
+      if ($runs.Count -gt 0) {
+        $floorUtc = $StartedUtc.AddSeconds(-10)
+        $candidates = @(
+          $runs | Where-Object {
+            $event = [string]$_.event
+            $createdAtRaw = [string]$_.createdAt
+            $headSha = [string]$_.headSha
+
+            if ($event -ne 'workflow_dispatch') {
+              return $false
+            }
+
+            $createdAt = $null
+            try {
+              $createdAt = [datetimeoffset]::Parse($createdAtRaw).UtcDateTime
+            }
+            catch {
+              return $false
+            }
+
+            if ($createdAt -lt $floorUtc) {
+              return $false
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($ExpectedHeadSha) -and $headSha -ne $ExpectedHeadSha) {
+              return $false
+            }
+
+            return $true
+          } | Sort-Object {[datetime]$_.createdAt} -Descending
+        )
+
+        if ($candidates.Count -gt 0) {
+          return [ordered]@{
+            run_id = [long]$candidates[0].databaseId
+            url = [string]$candidates[0].url
+            head_sha = [string]$candidates[0].headSha
+          }
+        }
+      }
+    }
+
+    Start-Sleep -Seconds $PollSeconds
+  }
+
+  throw "Unable to correlate dispatched workflow run after $maxAttempts attempts."
+}
+
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -Path $repoRoot
 
@@ -291,6 +366,8 @@ while ($true) {
   }
 
   $dispatchArgs = @('workflow', 'run', $WorkflowFile, '--ref', $Branch)
+  $headProbe = Invoke-External -FilePath 'git' -Arguments @('rev-parse', 'HEAD')
+  $expectedHeadSha = if ($headProbe.ExitCode -eq 0) { (($headProbe.Output -join "`n").Trim()) } else { '' }
   foreach ($pair in $normalizedWorkflowInputs) {
     if ([string]::IsNullOrWhiteSpace($pair) -or -not $pair.Contains('=')) {
       throw "Invalid -WorkflowInput '$pair'. Expected format key=value."
@@ -306,22 +383,13 @@ while ($true) {
   }
 
   $record.workflow_run.dispatched = $true
+  $record.workflow_run.head_sha_expected = $expectedHeadSha
 
-  Start-Sleep -Seconds 5
-  $latestArgs = @('run', 'list', '--workflow', $WorkflowFile, '--branch', $Branch, '--limit', '1', '--json', 'databaseId,url,status,conclusion,createdAt,headSha')
-  $latest = Invoke-External -FilePath 'gh' -Arguments $latestArgs
-  if ($latest.ExitCode -ne 0) {
-    throw "Unable to resolve latest workflow run."
-  }
-
-  $latestJson = ($latest.Output -join "`n") | ConvertFrom-Json
-  if (-not $latestJson -or $latestJson.Count -lt 1) {
-    throw "No workflow run found after dispatch."
-  }
-
-  $runId = [long]$latestJson[0].databaseId
+  $resolvedRunMeta = Resolve-DispatchedRunMeta -WorkflowFile $WorkflowFile -Branch $Branch -StartedUtc $startedUtc -ExpectedHeadSha $expectedHeadSha -PollSeconds $PollSeconds
+  $runId = [long]$resolvedRunMeta.run_id
   $record.workflow_run.run_id = $runId
-  $record.workflow_run.url = [string]$latestJson[0].url
+  $record.workflow_run.url = [string]$resolvedRunMeta.url
+  $record.workflow_run.head_sha_actual = [string]$resolvedRunMeta.head_sha
 
   while ($true) {
     $runApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/$runId")
