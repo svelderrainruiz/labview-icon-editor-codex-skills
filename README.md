@@ -43,6 +43,10 @@ Installer contract:
   - `contract-tests` -> `gather-release-notes`
   - `contract-tests` + `gather-release-notes` -> `prepare-vipb-linux`
   - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
+- VIPB version authority contract:
+  - `prepare-vipb-linux` treats `consumer/.lvversion` as authoritative for VIPB LabVIEW target.
+  - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
+  - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
 - PPL source contract (CI Pipeline lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
   - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`

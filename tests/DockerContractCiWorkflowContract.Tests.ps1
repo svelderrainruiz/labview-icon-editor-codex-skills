@@ -93,6 +93,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'Run VIPB diagnostics suite'
         $script:workflowContent | Should -Match 'continue-on-error:\s*true'
         $script:workflowContent | Should -Match 'scripts/Invoke-PrepareVipbDiagnostics\.ps1'
+        $script:workflowContent | Should -Match '-RepoRoot \(Join-Path \$env:GITHUB_WORKSPACE ''consumer''\)'
         $script:workflowContent | Should -Match 'Publish VIPB diagnostics summary'
         $script:workflowContent | Should -Match 'GITHUB_STEP_SUMMARY'
         $script:workflowContent | Should -Match 'vipb-diagnostics-summary\.md'

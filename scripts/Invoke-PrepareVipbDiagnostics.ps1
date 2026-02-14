@@ -3,6 +3,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+
+    [Parameter(Mandatory = $true)]
     [string]$VipbPath,
 
     [Parameter(Mandatory = $true)]
@@ -252,6 +255,71 @@ function Remove-MarkdownHeading {
     return ($lines -join [Environment]::NewLine).TrimEnd()
 }
 
+function Resolve-LvversionAuthorityInfo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRootPath,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $resolvedRepoRoot = Resolve-FullPath -Path $RepoRootPath
+    if (-not (Test-Path -LiteralPath $resolvedRepoRoot -PathType Container)) {
+        throw "RepoRoot directory not found: $resolvedRepoRoot"
+    }
+
+    $lvversionPath = Join-Path -Path $resolvedRepoRoot -ChildPath '.lvversion'
+    if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+        throw ".lvversion not found at $lvversionPath"
+    }
+
+    $rawValue = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+    if ($rawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+        throw ".lvversion value '$rawValue' is invalid. Expected numeric major.minor format (for example '26.0')."
+    }
+
+    $major = [int]$Matches['major']
+    $minor = [int]$Matches['minor']
+    $year = 2000 + $major
+    $numeric = "{0}.{1}" -f $major, $minor
+    $expectedVipbTarget = if ($Bitness -eq '64') {
+        "{0} (64-bit)" -f $numeric
+    }
+    else {
+        $numeric
+    }
+
+    return [ordered]@{
+        repo_root = $resolvedRepoRoot
+        lvversion_path = $lvversionPath
+        lvversion_raw = $rawValue
+        lvversion_numeric = $numeric
+        lvversion_year = $year
+        lvversion_minor = $minor
+        expected_vipb_target = $expectedVipbTarget
+    }
+}
+
+function Get-VipbPackageLabVIEWVersion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VipbFilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $VipbFilePath -PathType Leaf)) {
+        return ''
+    }
+
+    [xml]$vipbXml = Get-Content -LiteralPath $VipbFilePath -Raw -ErrorAction Stop
+    $rawValue = [string]$vipbXml.VI_Package_Builder_Settings.Library_General_Settings.Package_LabVIEW_Version
+    if ($null -eq $rawValue) {
+        return ''
+    }
+
+    return $rawValue.Trim()
+}
+
 $startedUtc = (Get-Date).ToUniversalTime()
 $resolvedOutputDirectory = Resolve-FullPath -Path $OutputDirectory
 Ensure-Directory -Path $resolvedOutputDirectory
@@ -291,13 +359,26 @@ function Write-Log {
 $status = 'failed'
 $errorPayload = $null
 $diff = $null
+$resolvedRepoRoot = $null
 $resolvedVipbPath = $null
 $resolvedReleaseNotesPath = $null
 $resolvedUpdateScriptPath = $null
+$versionAuthority = [ordered]@{
+    repo_root = $null
+    lvversion_path = $null
+    lvversion_raw = $null
+    lvversion_numeric = $null
+    lvversion_year = $null
+    lvversion_minor = $null
+    expected_vipb_target = $null
+    observed_vipb_target = $null
+    check_result = 'unknown'
+}
 
 Write-Log "Starting VIPB diagnostics suite."
 
 try {
+    $resolvedRepoRoot = Resolve-FullPath -Path $RepoRoot
     $resolvedVipbPath = Resolve-FullPath -Path $VipbPath
     $resolvedReleaseNotesPath = Resolve-FullPath -Path $ReleaseNotesFile
     $resolvedUpdateScriptPath = Resolve-FullPath -Path $UpdateScriptPath
@@ -310,6 +391,21 @@ try {
     }
     if (-not (Test-Path -LiteralPath $resolvedUpdateScriptPath -PathType Leaf)) {
         throw "Update script not found: $resolvedUpdateScriptPath"
+    }
+
+    $versionAuthority = Resolve-LvversionAuthorityInfo -RepoRootPath $resolvedRepoRoot -Bitness $SupportedBitness
+    $versionAuthority.observed_vipb_target = Get-VipbPackageLabVIEWVersion -VipbFilePath $resolvedVipbPath
+    $versionAuthority.check_result = if (
+        [string]::Equals(
+            [string]$versionAuthority.observed_vipb_target,
+            [string]$versionAuthority.expected_vipb_target,
+            [System.StringComparison]::Ordinal
+        )
+    ) {
+        'pass'
+    }
+    else {
+        'fail'
     }
 
     $displayInfoRaw = [string]$DisplayInformationJson
@@ -331,6 +427,7 @@ try {
     $updateArguments = @(
         '-NoProfile',
         '-File', $resolvedUpdateScriptPath,
+        '-RepoRoot', $resolvedRepoRoot,
         '-VipbPath', $resolvedVipbPath,
         '-ReleaseNotesFile', $resolvedReleaseNotesPath,
         '-DisplayInformationJson', $displayInfoRaw,
@@ -353,6 +450,25 @@ try {
         Write-Log ([string]$line)
     }
     if ($LASTEXITCODE -ne 0) {
+        $updateFailurePatterns = @(
+            'VIPB/.lvversion contract mismatch',
+            'LabVIEW version hint mismatch with \.lvversion',
+            '\.lvversion not found'
+        )
+        $failureDetail = @($updateOutput | ForEach-Object { [string]$_ } | Where-Object {
+            $candidate = $_
+            foreach ($pattern in $updateFailurePatterns) {
+                if ($candidate -match $pattern) {
+                    return $true
+                }
+            }
+            return $false
+        } | Select-Object -Last 1)
+
+        if ($failureDetail.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($failureDetail[0])) {
+            throw "Update-VipbDisplayInfo.ps1 failed with exit code $LASTEXITCODE. $($failureDetail[0])"
+        }
+
         throw "Update-VipbDisplayInfo.ps1 failed with exit code $LASTEXITCODE."
     }
 
@@ -386,8 +502,10 @@ catch {
         message = $_.Exception.Message
         line = $_.InvocationInfo.ScriptLineNumber
         column = $_.InvocationInfo.OffsetInLine
+        repo_root = $RepoRoot
         vipb_path = $VipbPath
         release_notes_path = $ReleaseNotesFile
+        version_authority_check = $versionAuthority.check_result
     }
     Write-Log ("ERROR: {0}" -f $errorPayload.message)
 }
@@ -452,6 +570,7 @@ finally {
             minor_revision = [string]$LabVIEWMinorRevision
             bitness = $SupportedBitness
         }
+        version_authority = $versionAuthority
         package_version = [ordered]@{
             major = $Major
             minor = $Minor
@@ -518,6 +637,15 @@ finally {
     $diagnosticsSummary.Add(('- Duration seconds: `{0}`' -f $durationSeconds))
     $diagnosticsSummary.Add(('- Source: `{0}` @ `{1}`' -f $SourceRepository, $SourceSha))
     $diagnosticsSummary.Add(('- Workflow run: `{0}` attempt `{1}`' -f $BuildRunId, $BuildRunAttempt))
+    $diagnosticsSummary.Add('')
+    $diagnosticsSummary.Add('### Version Authority')
+    $diagnosticsSummary.Add('')
+    $diagnosticsSummary.Add(('- Repo root: `{0}`' -f (Format-MarkdownCell -Value (Get-DisplayPath -Path ([string]$versionAuthority.repo_root) -BasePath $workspaceRoot) -MaxLength 260)))
+    $diagnosticsSummary.Add(('- .lvversion path: `{0}`' -f (Format-MarkdownCell -Value (Get-DisplayPath -Path ([string]$versionAuthority.lvversion_path) -BasePath $workspaceRoot) -MaxLength 260)))
+    $diagnosticsSummary.Add(('- .lvversion raw: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.lvversion_raw) -MaxLength 60)))
+    $diagnosticsSummary.Add(('- Expected VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.expected_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Observed VIPB target: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.observed_vipb_target) -MaxLength 120)))
+    $diagnosticsSummary.Add(('- Authority check: `{0}`' -f (Format-MarkdownCell -Value ([string]$versionAuthority.check_result) -MaxLength 20)))
     $diagnosticsSummary.Add('')
     $diagnosticsSummary.Add('### Changed Fields Quick View')
     $diagnosticsSummary.Add('')

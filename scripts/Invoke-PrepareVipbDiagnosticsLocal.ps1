@@ -132,6 +132,7 @@ $containerCommand = @"
 set -euo pipefail
 if command -v timeout >/dev/null 2>&1; then
   timeout ${TimeoutSeconds}s pwsh -NoProfile -File /workspace/scripts/Invoke-PrepareVipbDiagnostics.ps1 \
+    -RepoRoot '/workspace/consumer' \
     -VipbPath '/workspace/consumer/Tooling/deployment/NI Icon editor.vipb' \
     -ReleaseNotesFile '/workspace/consumer/Tooling/deployment/release_notes.md' \
     -DisplayInformationJson "`$DISPLAY_INFORMATION_JSON" \
@@ -152,6 +153,7 @@ if command -v timeout >/dev/null 2>&1; then
     -UpdateScriptPath '/workspace/scripts/Update-VipbDisplayInfo.ps1'
 else
   pwsh -NoProfile -File /workspace/scripts/Invoke-PrepareVipbDiagnostics.ps1 \
+    -RepoRoot '/workspace/consumer' \
     -VipbPath '/workspace/consumer/Tooling/deployment/NI Icon editor.vipb' \
     -ReleaseNotesFile '/workspace/consumer/Tooling/deployment/release_notes.md' \
     -DisplayInformationJson "`$DISPLAY_INFORMATION_JSON" \

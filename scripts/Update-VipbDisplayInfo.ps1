@@ -3,6 +3,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+
+    [Parameter(Mandatory = $true)]
     [string]$VipbPath,
 
     [Parameter(Mandatory = $true)]
@@ -139,7 +142,61 @@ function Set-OrCreateElementText {
     }
 }
 
+function Resolve-LvversionAuthorityInfo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRootPath,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $resolvedRepoRoot = Resolve-FullPath -Path $RepoRootPath
+    if (-not (Test-Path -LiteralPath $resolvedRepoRoot -PathType Container)) {
+        throw "RepoRoot directory not found: $resolvedRepoRoot"
+    }
+
+    $lvversionPath = Join-Path -Path $resolvedRepoRoot -ChildPath '.lvversion'
+    if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+        throw ".lvversion not found at $lvversionPath"
+    }
+
+    $rawValue = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+    if ($rawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+        throw ".lvversion value '$rawValue' is invalid. Expected numeric major.minor format (for example '26.0')."
+    }
+
+    $major = [int]$Matches['major']
+    $minor = [int]$Matches['minor']
+    $year = 2000 + $major
+    $numeric = "{0}.{1}" -f $major, $minor
+    $expectedVipbTarget = if ($Bitness -eq '64') {
+        "{0} (64-bit)" -f $numeric
+    } else {
+        $numeric
+    }
+
+    return [pscustomobject]@{
+        RepoRoot = $resolvedRepoRoot
+        LvversionPath = $lvversionPath
+        Raw = $rawValue
+        Numeric = $numeric
+        Year = $year
+        MinorRevision = $minor
+        ExpectedVipbTarget = $expectedVipbTarget
+    }
+}
+
 try {
+    $authorityInfo = Resolve-LvversionAuthorityInfo -RepoRootPath $RepoRoot -Bitness $SupportedBitness
+
+    if ($LabVIEWVersionYear -ne $authorityInfo.Year -or $LabVIEWMinorRevision -ne $authorityInfo.MinorRevision) {
+        throw (
+            "LabVIEW version hint mismatch with .lvversion. Provided '{0}.{1}' but .lvversion '{2}' resolves to '{3}.{4}'." -f
+            $LabVIEWVersionYear, $LabVIEWMinorRevision, $authorityInfo.Raw, $authorityInfo.Year, $authorityInfo.MinorRevision
+        )
+    }
+
     $resolvedVipbPath = Resolve-FullPath -Path $VipbPath
     if (-not (Test-Path -LiteralPath $resolvedVipbPath -PathType Leaf)) {
         throw "VIPB file not found: $resolvedVipbPath"
@@ -212,15 +269,18 @@ try {
         throw "VIPB file is missing expected sections: Library_General_Settings and Advanced_Settings/Description."
     }
 
+    $currentVipbTarget = [string]$generalSettings.Package_LabVIEW_Version
+    if (-not [string]::Equals($currentVipbTarget, $authorityInfo.ExpectedVipbTarget, [System.StringComparison]::Ordinal)) {
+        throw (
+            "VIPB/.lvversion contract mismatch. VIPB Package_LabVIEW_Version '{0}' does not match .lvversion target '{1}' from '{2}'." -f
+            $currentVipbTarget, $authorityInfo.ExpectedVipbTarget, $authorityInfo.LvversionPath
+        )
+    }
+
     $changes = New-Object 'System.Collections.Generic.List[object]'
 
     $libraryVersionValue = "{0}.{1}.{2}.{3}" -f $Major, $Minor, $Patch, $Build
-    $lvNumericVersion = "{0}.{1}" -f ($LabVIEWVersionYear - 2000), $LabVIEWMinorRevision
-    $packageLabVIEWVersion = if ($SupportedBitness -eq '64') {
-        "{0} (64-bit)" -f $lvNumericVersion
-    } else {
-        $lvNumericVersion
-    }
+    $packageLabVIEWVersion = $authorityInfo.ExpectedVipbTarget
 
     $descriptionValue = [string]$displayInfo.'Product Description'
     if (-not [string]::IsNullOrWhiteSpace($Commit)) {
@@ -329,6 +389,7 @@ catch {
         message             = $_.Exception.Message
         line                = $_.InvocationInfo.ScriptLineNumber
         column              = $_.InvocationInfo.OffsetInLine
+        repo_root           = $RepoRoot
         vipb_path           = $VipbPath
         diff_output_path    = $DiffOutputPath
         summary_output_path = $SummaryMarkdownPath

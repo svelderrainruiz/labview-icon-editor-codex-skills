@@ -523,6 +523,7 @@ jobs:
           New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
 
           & "$env:GITHUB_WORKSPACE/scripts/Invoke-PrepareVipbDiagnostics.ps1" `
+            -RepoRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
             -VipbPath (Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH) `
             -ReleaseNotesFile (Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md') `
             -DisplayInformationJson $env:DISPLAY_INFORMATION_JSON `
