@@ -555,6 +555,14 @@ jobs:
 
           vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
 
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            if ! docker pull "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+              echo "Unable to pull/access Linux image: $LINUX_LABVIEW_IMAGE" >&2
+              echo "Ensure the image exists and the runner has registry auth, or override linux_labview_image with a reachable image for triage." >&2
+              exit 1
+            fi
+          fi
+
           docker run --rm \
             -v "$GITHUB_WORKSPACE/consumer:/workspace" \
             -w /workspace \
