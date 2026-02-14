@@ -30,7 +30,7 @@ echo %*>>"%VIPM_TEST_LOG_PATH%"
 if /I "%1"=="activate" (
   if "%VIPM_TEST_FAIL_ACTIVATE%"=="1" (
     echo activation failed 1>&2
-    exit /b 23
+    exit 23
   )
   exit /b 0
 )

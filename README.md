@@ -103,3 +103,6 @@ Installer contract:
 - If your Windows host only supports Docker Linux containers, set `ppl_build_lane=linux-container` (default).
 - Linux stage fails fast if `vipm` is not available in the selected Linux image.
 - If `vipm_community_edition=true`, Linux stage runs `vipm activate` before `vipm build`.
+- Local fast-triage helper for the Linux packaging step:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PackageVipLinuxLocal.ps1`
+  - Optional overrides: `-LinuxLabviewImage`, `-ConsumerPath`, `-VipmProjectPath`, `-VipmCommunityEdition:$false`
