@@ -44,12 +44,12 @@ Installer contract:
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
-  - `contract-tests` -> `run-lunit-smoke-lv2020` (required native smoke gate on self-hosted Windows)
+  - `contract-tests` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
   - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
   - `contract-tests` -> `gather-release-notes`
   - `contract-tests` -> `resolve-labview-profile`
   - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
-  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020`
+  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020x64`
   - `build-vip-self-hosted` + `resolve-labview-profile` -> `install-vip-x86-self-hosted`
   - `build-vip-self-hosted` + `install-vip-x86-self-hosted` -> `ci-self-hosted-final-gate`
 - LabVIEW target presets (advisory):
@@ -77,8 +77,8 @@ Installer contract:
 - Native self-hosted packaging contract:
   - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
   - required native LabVIEW 2020 smoke runner label: `[self-hosted, windows, self-hosted-windows-lv2020x64]`
-  - `run-lunit-smoke-lv2020` uses direct `g-cli lunit` contract commands and enforces required `64-bit` coverage only.
-  - `run-lunit-smoke-lv2020` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
+  - `run-lunit-smoke-lv2020x64` uses direct `g-cli lunit` contract commands and enforces required `64-bit` coverage only.
+  - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
   - `.vipb` flow in self-hosted lane is consume-only:
     - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
     - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle

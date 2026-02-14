@@ -76,7 +76,7 @@ jobs:
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
-  run-lunit-smoke-lv2020:
+  run-lunit-smoke-lv2020x64:
     runs-on: [self-hosted, windows, self-hosted-windows-lv2020x64]
     needs: [contract-tests]
     steps:
@@ -1047,7 +1047,7 @@ jobs:
 
   build-vip-self-hosted:
     runs-on: [self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]
-    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020]
+    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020x64]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'

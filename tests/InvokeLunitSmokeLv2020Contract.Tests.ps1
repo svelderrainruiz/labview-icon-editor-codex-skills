@@ -31,6 +31,8 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match '''lunit'''
         $script:scriptContent | Should -Match '''-h'''
         $script:scriptContent | Should -Match '''-r'''
+        $script:scriptContent | Should -Match 'continuing to run command gate'
+        $script:scriptContent | Should -Not -Match 'g-cli LUnit help command failed with exit code'
         $script:scriptContent | Should -Match 'lunit-smoke\.status\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.result\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.log'
@@ -78,8 +80,10 @@ if not "%reportPath%"=="" (
     if not exist "%%~dpI" mkdir "%%~dpI"
   )
   >"%reportPath%" echo ^<testsuite^>^<testcase name="Smoke" classname="LV2020" status="Passed" /^>^</testsuite^>
+  exit /b 0
 )
-exit /b 0
+echo Missing Parameters: report_path
+exit /b 1
 '@ | Set-Content -LiteralPath $mockGcliPath -Encoding ASCII
             $env:PATH = "$binDir;$originalPath"
 
@@ -109,10 +113,13 @@ exit /b 0
             [string]$resultPayload.required_bitness | Should -Be '64'
             [string]$resultPayload.status | Should -Be 'passed'
             [string]$resultPayload.workspace.lvversion_after | Should -Be '20.0'
+            [int]$resultPayload.command_results.help_exit_code | Should -Be 1
+            [int]$resultPayload.command_results.run_exit_code | Should -Be 0
 
             [string](Get-Content -LiteralPath (Join-Path $sourceRoot '.lvversion') -Raw).Trim() | Should -Be '26.0'
             [string](Get-Content -LiteralPath (Join-Path $outputDirectory 'workspace/lvversion.before') -Raw).Trim() | Should -Be '26.0'
             [string](Get-Content -LiteralPath (Join-Path $outputDirectory 'workspace/lvversion.after') -Raw).Trim() | Should -Be '20.0'
+            [string](Get-Content -LiteralPath (Join-Path $outputDirectory 'lunit-smoke.log') -Raw) | Should -Match 'WARNING: g-cli LUnit help command exited with code 1; continuing to run command gate\.'
 
             $invocationLog = Get-Content -LiteralPath (Join-Path $binDir 'gcli-invocations.log') -Raw
             $invocationLog | Should -Match '--arch 64'

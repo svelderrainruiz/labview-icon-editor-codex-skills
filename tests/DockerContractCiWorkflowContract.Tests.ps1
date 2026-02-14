@@ -34,7 +34,7 @@ Describe 'Docker contract CI workflow contract' {
 
     It 'defines ordered contract-tests then lunit smoke, windows or linux build jobs plus release-notes/profile/VIPB prep then self-hosted package, install, and final gate jobs' {
         $script:workflowContent | Should -Match 'contract-tests:'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020:'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:'
         $script:workflowContent | Should -Match 'build-x64-ppl-linux:'
         $script:workflowContent | Should -Match 'gather-release-notes:'
@@ -43,8 +43,8 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'build-vip-self-hosted:'
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:'
         $script:workflowContent | Should -Match 'ci-self-hosted-final-gate:'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv2020x64\]'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv2020x64\]'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-x64-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-x64-ppl-windows\]'
@@ -55,7 +55,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*gather-release-notes,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv2020x64,\s*self-hosted-windows-lv2020x86\]'
-        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux,\s*run-lunit-smoke-lv2020\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux,\s*run-lunit-smoke-lv2020x64\]'
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?needs:\s*\[build-vip-self-hosted,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'ci-self-hosted-final-gate:\s*[\s\S]*?needs:\s*\[build-vip-self-hosted,\s*install-vip-x86-self-hosted\]'
     }
@@ -145,11 +145,11 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'runs native LabVIEW 2020 lunit smoke gate in x64 and uploads diagnostics artifact' {
-        $runLunitBlockMatch = [regex]::Match($script:workflowContent, 'run-lunit-smoke-lv2020:\s*[\s\S]*?build-x64-ppl-windows:', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        $runLunitBlockMatch = [regex]::Match($script:workflowContent, 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?build-x64-ppl-windows:', [System.Text.RegularExpressions.RegexOptions]::Singleline)
         $runLunitBlockMatch.Success | Should -BeTrue
         $runLunitBlock = $runLunitBlockMatch.Value
 
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020:'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:'
         $script:workflowContent | Should -Match 'Run native LabVIEW 2020 LUnit smoke \(x64\)'
         $script:workflowContent | Should -Match 'scripts/Invoke-LunitSmokeLv2020\.ps1'
         $script:workflowContent | Should -Match '-TargetLabVIEWVersion 2020'

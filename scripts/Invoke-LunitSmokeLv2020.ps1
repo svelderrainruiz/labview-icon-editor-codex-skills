@@ -340,7 +340,7 @@ try {
     $result.command_results.help_exit_code = $helpExitCode
     $result.command_results.help_output = (@($helpOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)
     if ($helpExitCode -ne 0) {
-        throw "g-cli LUnit help command failed with exit code $helpExitCode."
+        Write-Log ("WARNING: g-cli LUnit help command exited with code {0}; continuing to run command gate." -f $helpExitCode)
     }
 
     Write-Log ("Executing run command: {0}" -f $result.commands.run)
