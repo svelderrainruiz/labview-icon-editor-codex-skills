@@ -106,3 +106,13 @@ Installer contract:
 - Local fast-triage helper for the Linux packaging step:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PackageVipLinuxLocal.ps1`
   - Optional overrides: `-LinuxLabviewImage`, `-ConsumerPath`, `-VipmProjectPath`, `-VipmCommunityEdition:$false`
+
+## Autonomous CI loop
+- Continuous autonomous branch integration helper:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1`
+- Typical bounded smoke run (1 cycle, stop on failure):
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
+- Pass workflow dispatch inputs (`key=value`) repeatedly:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=main"`
+- Optional JSONL log output:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
