@@ -1,6 +1,28 @@
 name: CI Pipeline
 
 on:
+  workflow_call:
+    inputs:
+      source_project_repo:
+        description: 'Source project repository to build against'
+        required: false
+        default: 'svelderrainruiz/labview-icon-editor'
+        type: string
+      source_project_ref:
+        description: 'Source project ref to check out'
+        required: false
+        default: 'patch/456-2020-migration-branch-from-9e46ecf'
+        type: string
+      source_project_sha:
+        description: 'Expected source project commit SHA'
+        required: false
+        default: '9e46ecf591bc36afca8ddf4ce688a5f58604a12a'
+        type: string
+      labview_profile:
+        description: 'LabVIEW target preset id from profiles/labview/profiles.json'
+        required: false
+        default: 'lv2026'
+        type: string
   pull_request:
     paths:
       - 'tests/**'
@@ -25,16 +47,16 @@ permissions:
   contents: read
 
 env:
-  CONSUMER_REPO: svelderrainruiz/labview-icon-editor
-  CONSUMER_REF: patch/456-2020-migration-branch-from-9e46ecf
-  CONSUMER_EXPECTED_SHA: 9e46ecf591bc36afca8ddf4ce688a5f58604a12a
+  CONSUMER_REPO: ${{ inputs.source_project_repo || 'svelderrainruiz/labview-icon-editor' }}
+  CONSUMER_REF: ${{ inputs.source_project_ref || 'patch/456-2020-migration-branch-from-9e46ecf' }}
+  CONSUMER_EXPECTED_SHA: ${{ inputs.source_project_sha || '9e46ecf591bc36afca8ddf4ce688a5f58604a12a' }}
   WINDOWS_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-windows
   LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
   WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
   LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
   VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
   LABVIEW_PROFILES_ROOT: profiles/labview
-  DEFAULT_LABVIEW_PROFILE: lv2026
+  DEFAULT_LABVIEW_PROFILE: ${{ inputs.labview_profile || 'lv2026' }}
   LABVIEW_VERSION: '2026'
   BITNESS: '64'
 
@@ -65,7 +87,7 @@ jobs:
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
-  build-ppl-windows:
+  build-x64-ppl-windows:
     runs-on: windows-latest
     needs: [contract-tests]
     steps:
@@ -98,7 +120,7 @@ jobs:
             throw "Missing required source project script '$required'."
           }
 
-      - name: Build Windows PPL in NI Windows container
+      - name: Build Windows x64 PPL in NI Windows container
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -156,7 +178,7 @@ jobs:
             Write-Host "Copied Windows PPL build output to expected bundle path: $targetPplPath"
           }
 
-      - name: Create Windows PPL bundle manifest
+      - name: Create Windows x64 PPL bundle manifest
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -180,23 +202,23 @@ jobs:
             -BuildRunId "$env:GITHUB_RUN_ID" `
             -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
 
-      - name: Upload Windows raw PPL artifact
+      - name: Upload Windows raw x64 PPL artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-contract-ppl-windows-raw-${{ github.run_id }}
+          name: docker-contract-ppl-windows-raw-x64-${{ github.run_id }}
           path: ${{ github.workspace }}/${{ env.WINDOWS_PPL_OUTPUT_PATH }}
           if-no-files-found: error
 
-      - name: Upload Windows PPL bundle artifact
+      - name: Upload Windows x64 PPL bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-contract-ppl-bundle-windows-${{ github.run_id }}
+          name: docker-contract-ppl-bundle-windows-x64-${{ github.run_id }}
           path: ${{ runner.temp }}/ppl-bundle-windows
           if-no-files-found: error
 
-  build-ppl-linux:
+  build-x64-ppl-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, build-ppl-windows]
+    needs: [contract-tests, build-x64-ppl-windows]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -251,7 +273,7 @@ jobs:
             fi
           fi
 
-      - name: Build Linux PPL in NI Linux container
+      - name: Build Linux x64 PPL in NI Linux container
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -327,7 +349,7 @@ jobs:
             Write-Host "Copied Linux PPL build output to expected bundle path: $targetPplPath"
           }
 
-      - name: Create Linux PPL bundle manifest
+      - name: Create Linux x64 PPL bundle manifest
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -351,17 +373,17 @@ jobs:
             -BuildRunId "$env:GITHUB_RUN_ID" `
             -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
 
-      - name: Upload Linux raw PPL artifact
+      - name: Upload Linux raw x64 PPL artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-contract-ppl-linux-raw-${{ github.run_id }}
+          name: docker-contract-ppl-linux-raw-x64-${{ github.run_id }}
           path: ${{ github.workspace }}/${{ env.LINUX_PPL_OUTPUT_PATH }}
           if-no-files-found: error
 
-      - name: Upload Linux PPL bundle artifact
+      - name: Upload Linux x64 PPL bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-contract-ppl-bundle-linux-${{ github.run_id }}
+          name: docker-contract-ppl-bundle-linux-x64-${{ github.run_id }}
           path: ${{ runner.temp }}/ppl-bundle-linux
           if-no-files-found: error
 
@@ -453,7 +475,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $profileId = '${{ github.event.inputs.labview_profile }}'
+          $profileId = '${{ inputs.labview_profile }}'
           if ([string]::IsNullOrWhiteSpace($profileId)) {
             $profileId = $env:DEFAULT_LABVIEW_PROFILE
           }
@@ -847,7 +869,7 @@ jobs:
 
   build-vip-self-hosted:
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
-    needs: [build-ppl-windows, build-ppl-linux, prepare-vipb-linux]
+    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -934,10 +956,10 @@ jobs:
             New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
           }
 
-      - name: Download Windows PPL bundle artifact
+      - name: Download Windows x64 PPL bundle artifact
         uses: actions/download-artifact@v4
         with:
-          name: docker-contract-ppl-bundle-windows-${{ github.run_id }}
+          name: docker-contract-ppl-bundle-windows-x64-${{ github.run_id }}
           path: ${{ runner.temp }}/ppl-bundle-windows
 
       - name: Download prepared VIPB artifact
@@ -1094,4 +1116,5 @@ jobs:
           name: docker-contract-vip-package-self-hosted-${{ github.run_id }}
           path: ${{ steps.locate-vip.outputs.vip_file_path }}
           if-no-files-found: error
+
 

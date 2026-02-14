@@ -14,36 +14,40 @@ Layered Codex skill assets for `labview-icon-editor` CI/runtime integrations.
   - `vipm-cli-machine/*`
 
 ## Release contract
-The release asset is pinned by the consumer lock file and validated by:
+The release assets are pinned by the source project lock file and validated by:
 - SHA256 digest
 - required files list
 - manifest `license_spdx` (`0BSD`)
 
-Parity evidence contract:
-- Primary evidence source is this repository's `labview-parity-gate` workflow run URL.
-- `labview-parity-gate` performs a consumer sandbox preflight by cloning `consumer_ref`, asserting `HEAD == consumer_sha`, and emitting a static evidence artifact.
-- Consumer parity run URL is retained as secondary provenance in release notes.
-- Upstream `svelderrainruiz/labview-icon-editor` requires strict triple parity (`Linux`, `Self-Hosted`, `Windows`).
-- Fork consumers are accepted with container-only parity requirements (`Linux`, `Windows`).
+CI-gated release contract:
+- Primary release gate is this repository's `CI Pipeline` workflow (`.github/workflows/ci.yml`) invoked by `release-skill-layer`.
+- `release-skill-layer` dispatch remains explicit for source project pinning (`consumer_repo`, `consumer_ref`, `consumer_sha`), then passes those values into reusable `ci.yml`.
+- Release payload includes the NSIS installer and core CI artifacts:
+  - `lvie-codex-skill-layer-installer.exe`
+  - `lvie-ppl-bundle-windows-x64.zip`
+  - `lvie-ppl-bundle-linux-x64.zip`
+  - `lvie-vip-package-self-hosted.zip`
+  - `release-provenance.json`
 
 Installer contract:
 - Canonical NSIS root: `C:\Program Files (x86)\NSIS`
 - Required binary: `C:\Program Files (x86)\NSIS\makensis.exe`
 - Optional override: repository variable `NSIS_ROOT` or script argument `-MakensisPath`
 - NSIS headless install supports `/S`.
-- Consumer lock defines installer args and install-root template.
+- Source project lock defines installer args and install-root template.
 
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
+  - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
-  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
+  - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
   - `contract-tests` -> `gather-release-notes`
   - `contract-tests` -> `resolve-labview-profile`
   - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
-  - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
+  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, and `prepare-vipb-linux`
 - LabVIEW target presets (advisory):
   - target preset catalog is repo-owned under `profiles/labview`.
   - target preset resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
@@ -71,14 +75,14 @@ Installer contract:
   - package version baseline for native lane: `0.1.0.<run_number>`
   - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
 - Published artifacts:
-  - `docker-contract-ppl-windows-raw-<run_id>` containing:
+  - `docker-contract-ppl-windows-raw-x64-<run_id>` containing:
     - `consumer/resource/plugins/lv_icon.windows.lvlibp`
-  - `docker-contract-ppl-bundle-windows-<run_id>` containing:
+  - `docker-contract-ppl-bundle-windows-x64-<run_id>` containing:
     - `lv_icon.windows.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
-  - `docker-contract-ppl-linux-raw-<run_id>` containing:
+  - `docker-contract-ppl-linux-raw-x64-<run_id>` containing:
     - `consumer/resource/plugins/lv_icon.linux.lvlibp`
-  - `docker-contract-ppl-bundle-linux-<run_id>` containing:
+  - `docker-contract-ppl-bundle-linux-x64-<run_id>` containing:
     - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
   - `docker-contract-release-notes-<run_id>` containing:
@@ -165,3 +169,4 @@ Installer contract:
 - Behavior:
   - `auto`: tries `runner-cli` (if present), then `gh`, then REST API token fallback.
   - `runner-cli`/`gh`/`rest`: force a specific backend and fail fast if unavailable.
+

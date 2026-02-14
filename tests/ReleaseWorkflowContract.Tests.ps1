@@ -7,42 +7,42 @@ Describe 'Release workflow contract' {
     BeforeAll {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
         $script:releaseWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-skill-layer.yml'
-        $script:parityWorkflowPath = Join-Path $script:repoRoot '.github/workflows/labview-parity.yml'
+        $script:ciWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ci.yml'
 
-        foreach ($path in @($script:releaseWorkflowPath, $script:parityWorkflowPath)) {
+        foreach ($path in @($script:releaseWorkflowPath, $script:ciWorkflowPath)) {
             if (-not (Test-Path -Path $path -PathType Leaf)) {
                 throw "Required workflow missing: $path"
             }
         }
 
         $script:releaseContent = Get-Content -Path $script:releaseWorkflowPath -Raw
-        $script:parityContent = Get-Content -Path $script:parityWorkflowPath -Raw
+        $script:ciContent = Get-Content -Path $script:ciWorkflowPath -Raw
     }
 
-    It 'keeps release workflow as dispatch-only and parity-gated' {
+    It 'keeps release workflow dispatch-only and CI-gated via reusable ci.yml' {
         $script:releaseContent | Should -Match 'on:\s*workflow_dispatch:'
-        $script:releaseContent | Should -Match 'parity-gate:'
-        $script:releaseContent | Should -Match 'uses:\s+\./\.github/workflows/labview-parity\.yml'
-        $script:releaseContent | Should -Match 'package:\s*\r?\n\s*needs:\s*\[parity-gate\]'
+        $script:releaseContent | Should -Match 'ci-gate:'
+        $script:releaseContent | Should -Match 'uses:\s+\./\.github/workflows/ci\.yml'
+        $script:releaseContent | Should -Match 'package:\s*\r?\n\s*needs:\s*\[ci-gate\]'
+        $script:releaseContent | Should -Not -Match 'parity-gate:'
     }
 
-    It 'requires deterministic consumer gate inputs' {
+    It 'keeps explicit source project pin inputs and compatibility inputs' {
         $script:releaseContent | Should -Match 'release_tag:'
         $script:releaseContent | Should -Match 'consumer_repo:'
         $script:releaseContent | Should -Match 'consumer_ref:'
         $script:releaseContent | Should -Match 'consumer_sha:'
+        $script:releaseContent | Should -Match 'run_self_hosted:'
+        $script:releaseContent | Should -Match 'run_build_spec:'
+        $script:releaseContent | Should -Match '\(Deprecated\) retained for dispatch compatibility'
+        $script:releaseContent | Should -Match 'labview_profile:'
     }
 
-    It 'records skills parity gate evidence as primary release provenance' {
-        $script:releaseContent | Should -Match 'skills_parity_gate_run_url:'
-        $script:releaseContent | Should -Match 'skills_parity_gate_run_id:'
-        $script:releaseContent | Should -Match 'skills_parity_gate_run_attempt:'
-        $script:releaseContent | Should -Match 'skills_parity_enforcement_profile:'
-        $script:releaseContent | Should -Match 'consumer_sandbox_checked_sha:'
-        $script:releaseContent | Should -Match 'consumer_sandbox_evidence_artifact:'
-        $script:releaseContent | Should -Match 'consumer_parity_run_url:'
-        $script:releaseContent | Should -Match 'consumer_parity_run_id:'
-        $script:releaseContent | Should -Match 'consumer_parity_head_sha:'
+    It 'passes source project pin inputs into reusable CI gate' {
+        $script:releaseContent | Should -Match 'source_project_repo:\s*\$\{\{ inputs\.consumer_repo \}\}'
+        $script:releaseContent | Should -Match 'source_project_ref:\s*\$\{\{ inputs\.consumer_ref \}\}'
+        $script:releaseContent | Should -Match 'source_project_sha:\s*\$\{\{ inputs\.consumer_sha \}\}'
+        $script:releaseContent | Should -Match 'labview_profile:\s*\$\{\{ inputs\.labview_profile \}\}'
     }
 
     It 'packages vipm-cli-machine and linux-ppl-container-build modules in installer staging' {
@@ -50,38 +50,37 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'Copy-Item -Path "\$env:GITHUB_WORKSPACE/linux-ppl-container-build" -Destination "\$staging/linux-ppl-container-build" -Recurse -Force'
     }
 
-    It 'parity gate workflow validates required parity job names' {
-        $script:parityContent | Should -Match 'Parity \(Linux Container\)'
-        $script:parityContent | Should -Match 'Parity \(Self-Hosted Runner\)'
-        $script:parityContent | Should -Match 'Parity \(Windows Container\)'
+    It 'publishes release assets from CI artifacts plus installer' {
+        $script:releaseContent | Should -Match 'publish-release-assets:'
+        $script:releaseContent | Should -Match 'needs:\s*\[ci-gate,\s*package\]'
+        $script:releaseContent | Should -Match 'Download installer artifact'
+        $script:releaseContent | Should -Match 'pattern:\s*docker-contract-ppl-bundle-windows-x64-\*'
+        $script:releaseContent | Should -Match 'pattern:\s*docker-contract-ppl-bundle-linux-x64-\*'
+        $script:releaseContent | Should -Match 'pattern:\s*docker-contract-vip-package-self-hosted-\*'
+        $script:releaseContent | Should -Match 'lvie-ppl-bundle-windows-x64\.zip'
+        $script:releaseContent | Should -Match 'lvie-ppl-bundle-linux-x64\.zip'
+        $script:releaseContent | Should -Match 'lvie-vip-package-self-hosted\.zip'
+        $script:releaseContent | Should -Match 'release-provenance\.json'
+        $script:releaseContent | Should -Match 'gh release upload'
+        $script:releaseContent | Should -Match 'gh release create'
     }
 
-    It 'parity gate workflow emits skills-run metadata outputs' {
-        $script:parityContent | Should -Match 'consumer_sandbox_checked_sha:'
-        $script:parityContent | Should -Match 'consumer_sandbox_evidence_artifact:'
-        $script:parityContent | Should -Match 'gate_repo:'
-        $script:parityContent | Should -Match 'gate_run_id:'
-        $script:parityContent | Should -Match 'gate_run_url:'
-        $script:parityContent | Should -Match 'gate_run_attempt:'
-        $script:parityContent | Should -Match 'parity_enforcement_profile:'
+    It 'records CI-based release provenance fields in release notes content' {
+        $script:releaseContent | Should -Match 'skills_ci_repo:'
+        $script:releaseContent | Should -Match 'skills_ci_run_url:'
+        $script:releaseContent | Should -Match 'skills_ci_run_id:'
+        $script:releaseContent | Should -Match 'skills_ci_run_attempt:'
+        $script:releaseContent | Should -Match 'source_project_repo:'
+        $script:releaseContent | Should -Match 'source_project_ref:'
+        $script:releaseContent | Should -Match 'source_project_sha:'
     }
 
-    It 'parity gate workflow adds sandbox preflight by cloned consumer sha' {
-        $script:parityContent | Should -Match 'consumer-sandbox-preflight:'
-        $script:parityContent | Should -Match 'Checkout consumer repository snapshot'
-        $script:parityContent | Should -Match 'repository: \${{ inputs.consumer_repo }}'
-        $script:parityContent | Should -Match 'ref: \${{ inputs.consumer_ref }}'
-        $script:parityContent | Should -Match 'Sandbox preflight failed: checked out SHA'
-        $script:parityContent | Should -Match 'missing \.lvversion'
-        $script:parityContent | Should -Match 'Upload sandbox evidence artifact'
-        $script:parityContent | Should -Match 'needs: \[consumer-sandbox-preflight\]'
-    }
-
-    It 'parity gate workflow applies upstream strict and fork container-only profiles' {
-        $script:parityContent | Should -Match 'if \[\[ "\$PRECHECK_PROFILE" == "upstream-strict" \]\]'
-        $script:parityContent | Should -Match 'parity_enforcement_profile="upstream-strict"'
-        $script:parityContent | Should -Match 'parity_enforcement_profile="fork-container-only"'
-        $script:parityContent | Should -Match 'if \[\[ "\$PRECHECK_PROFILE" == "fork-container-only" \]\]'
-        $script:parityContent | Should -Match 'dispatch_run_self_hosted="false"'
+    It 'exposes reusable ci.yml source project override inputs' {
+        $script:ciContent | Should -Match 'workflow_call:'
+        $script:ciContent | Should -Match 'source_project_repo:'
+        $script:ciContent | Should -Match 'source_project_ref:'
+        $script:ciContent | Should -Match 'source_project_sha:'
+        $script:ciContent | Should -Match 'labview_profile:'
     }
 }
+

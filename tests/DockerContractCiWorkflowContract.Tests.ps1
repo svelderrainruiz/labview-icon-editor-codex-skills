@@ -21,17 +21,28 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match '''profiles/\*\*'''
     }
 
+    It 'supports reusable workflow_call with source project override inputs' {
+        $script:workflowContent | Should -Match 'workflow_call:'
+        $script:workflowContent | Should -Match 'source_project_repo:'
+        $script:workflowContent | Should -Match 'source_project_ref:'
+        $script:workflowContent | Should -Match 'source_project_sha:'
+        $script:workflowContent | Should -Match 'workflow_call:\s*[\s\S]*?labview_profile:'
+        $script:workflowContent | Should -Match 'CONSUMER_REPO:\s*\$\{\{\s*inputs\.source_project_repo'
+        $script:workflowContent | Should -Match 'CONSUMER_REF:\s*\$\{\{\s*inputs\.source_project_ref'
+        $script:workflowContent | Should -Match 'CONSUMER_EXPECTED_SHA:\s*\$\{\{\s*inputs\.source_project_sha'
+    }
+
     It 'defines ordered contract-tests then windows or linux build jobs plus release-notes, profile resolution, and VIPB prep then self-hosted package jobs' {
         $script:workflowContent | Should -Match 'contract-tests:'
-        $script:workflowContent | Should -Match 'build-ppl-windows:'
-        $script:workflowContent | Should -Match 'build-ppl-linux:'
+        $script:workflowContent | Should -Match 'build-x64-ppl-windows:'
+        $script:workflowContent | Should -Match 'build-x64-ppl-linux:'
         $script:workflowContent | Should -Match 'gather-release-notes:'
         $script:workflowContent | Should -Match 'resolve-labview-profile:'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:'
-        $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
-        $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
-        $script:workflowContent | Should -Match 'build-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-ppl-windows\]'
+        $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
+        $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'build-x64-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-x64-ppl-windows\]'
         $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
         $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'resolve-labview-profile:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
@@ -39,19 +50,19 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*gather-release-notes,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
-        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-ppl-windows,\s*build-ppl-linux,\s*prepare-vipb-linux\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux\]'
     }
 
-    It 'defines pinned consumer source and shared windows or linux build constants' {
-        $script:workflowContent | Should -Match 'CONSUMER_REPO:\s*svelderrainruiz/labview-icon-editor'
-        $script:workflowContent | Should -Match 'CONSUMER_REF:\s*patch/456-2020-migration-branch-from-9e46ecf'
-        $script:workflowContent | Should -Match 'CONSUMER_EXPECTED_SHA:\s*9e46ecf591bc36afca8ddf4ce688a5f58604a12a'
+    It 'defines pinned source-project defaults and shared windows or linux build constants' {
+        $script:workflowContent | Should -Match 'CONSUMER_REPO:\s*\$\{\{\s*inputs\.source_project_repo\s*\|\|\s*''svelderrainruiz/labview-icon-editor'''
+        $script:workflowContent | Should -Match 'CONSUMER_REF:\s*\$\{\{\s*inputs\.source_project_ref\s*\|\|\s*''patch/456-2020-migration-branch-from-9e46ecf'''
+        $script:workflowContent | Should -Match 'CONSUMER_EXPECTED_SHA:\s*\$\{\{\s*inputs\.source_project_sha\s*\|\|\s*''9e46ecf591bc36afca8ddf4ce688a5f58604a12a'''
         $script:workflowContent | Should -Match 'WINDOWS_LABVIEW_IMAGE:\s*nationalinstruments/labview:2026q1-windows'
         $script:workflowContent | Should -Match 'LINUX_LABVIEW_IMAGE:\s*nationalinstruments/labview:2026q1-linux-pwsh'
         $script:workflowContent | Should -Match 'WINDOWS_PPL_OUTPUT_PATH:\s*consumer/resource/plugins/lv_icon\.windows\.lvlibp'
         $script:workflowContent | Should -Match 'LINUX_PPL_OUTPUT_PATH:\s*consumer/resource/plugins/lv_icon\.linux\.lvlibp'
         $script:workflowContent | Should -Match 'LABVIEW_PROFILES_ROOT:\s*profiles/labview'
-        $script:workflowContent | Should -Match 'DEFAULT_LABVIEW_PROFILE:\s*lv2026'
+        $script:workflowContent | Should -Match 'DEFAULT_LABVIEW_PROFILE:\s*\$\{\{\s*inputs\.labview_profile\s*\|\|\s*''lv2026'''
     }
 
     It 'defines workflow_dispatch LabVIEW profile selector input' {
@@ -86,28 +97,28 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'docker-contract-labview-profile-resolution-\$\{\{\s*github\.run_id\s*\}\}'
     }
 
-    It 'builds windows PPL in windows container and uploads windows bundle artifact' {
-        $script:workflowContent | Should -Match 'Build Windows PPL in NI Windows container'
+    It 'builds windows x64 PPL in windows container and uploads windows x64 bundle artifact' {
+        $script:workflowContent | Should -Match 'Build Windows x64 PPL in NI Windows container'
         $script:workflowContent | Should -Match 'runlabview-windows\.ps1'
-        $script:workflowContent | Should -Match 'Create Windows PPL bundle manifest'
-        $script:workflowContent | Should -Match 'Upload Windows raw PPL artifact'
-        $script:workflowContent | Should -Match 'docker-contract-ppl-windows-raw-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-windows-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'Upload Windows PPL bundle artifact'
+        $script:workflowContent | Should -Match 'Create Windows x64 PPL bundle manifest'
+        $script:workflowContent | Should -Match 'Upload Windows raw x64 PPL artifact'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-windows-raw-x64-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-windows-x64-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'Upload Windows x64 PPL bundle artifact'
     }
 
-    It 'builds linux PPL with CRLF-safe temp copy and uploads linux bundle artifact' {
+    It 'builds linux x64 PPL with CRLF-safe temp copy and uploads linux x64 bundle artifact' {
         $expectedSedNormalization = [regex]::Escape('sed -i ''s/\r$//'' "$script_file"')
-        $script:workflowContent | Should -Match 'Build Linux PPL in NI Linux container'
+        $script:workflowContent | Should -Match 'Build Linux x64 PPL in NI Linux container'
         $script:workflowContent | Should -Match 'tmp_script_dir="\$\(mktemp -d\)"'
         $script:workflowContent | Should -Match 'cp -a "\$script_dir/\." "\$tmp_script_dir/"'
         $script:workflowContent | Should -Match $expectedSedNormalization
         $script:workflowContent | Should -Match '"\$tmp_script_dir/runlabview-linux\.sh"'
-        $script:workflowContent | Should -Match 'Create Linux PPL bundle manifest'
-        $script:workflowContent | Should -Match 'Upload Linux raw PPL artifact'
-        $script:workflowContent | Should -Match 'docker-contract-ppl-linux-raw-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-linux-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'Upload Linux PPL bundle artifact'
+        $script:workflowContent | Should -Match 'Create Linux x64 PPL bundle manifest'
+        $script:workflowContent | Should -Match 'Upload Linux raw x64 PPL artifact'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-linux-raw-x64-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'docker-contract-ppl-bundle-linux-x64-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'Upload Linux x64 PPL bundle artifact'
     }
 
     It 'runs VIPB diagnostics suite on linux and emits summary plus artifact' {
@@ -153,7 +164,7 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'consumes windows x64 PPL and linux-prepared VIPB, then only builds native x86 in self-hosted lane' {
-        $script:workflowContent | Should -Match 'Download Windows PPL bundle artifact'
+        $script:workflowContent | Should -Match 'Download Windows x64 PPL bundle artifact'
         $script:workflowContent | Should -Match 'Download prepared VIPB artifact'
         $script:workflowContent | Should -Match 'actions/download-artifact@v4'
         $script:workflowContent | Should -Match 'Consume prepared VIPB from Linux artifact'
@@ -180,3 +191,4 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'docker-contract-vip-package-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
     }
 }
+
