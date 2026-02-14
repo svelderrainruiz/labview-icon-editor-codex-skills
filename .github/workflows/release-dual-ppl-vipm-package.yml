@@ -567,10 +567,14 @@ jobs:
           vipm_project_path_in_container="/workspace/${VIPM_PROJECT_PATH#consumer/}"
 
           if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
-            if ! docker pull "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            pull_output=""
+            if ! pull_output="$(docker pull "$LINUX_LABVIEW_IMAGE" 2>&1)"; then
+              echo "Preflight: unable to pull Linux image '$LINUX_LABVIEW_IMAGE'." >&2
+              echo "$pull_output" | tail -n 40 >&2
               dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
               if [[ -f "$dockerfile_path" ]]; then
                 echo "Preflight: pull failed; attempting local build from $dockerfile_path" >&2
+                echo "Fallback build note: VIPM is not provisioned unless present in base image or the fallback image is built with VIPM_CLI_URL/VIPM_CLI_SHA256." >&2
                 if ! docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
                   echo "Unable to pull/build Linux image: $LINUX_LABVIEW_IMAGE" >&2
                   echo "Ensure the image exists, base image access is configured, or runner auth is available." >&2
