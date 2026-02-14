@@ -159,6 +159,7 @@ $normalizedWorkflowInputs = Get-NormalizedWorkflowInputs -RawInputs $WorkflowInp
 if ($TriagePackageVipLinux.IsPresent) {
   $triageInputs = @(
     'ppl_build_lane=linux-container',
+    'labview_community_edition=true',
     'linux_labview_image=mcr.microsoft.com/powershell:7.4-ubuntu-22.04',
     "windows_build_command=New-Item -ItemType Directory -Path 'consumer/resource/plugins' -Force | Out-Null; Set-Content -Path 'consumer/resource/plugins/lv_icon.lvlibp' -Value 'stub-ppl' -Encoding ascii"
   )

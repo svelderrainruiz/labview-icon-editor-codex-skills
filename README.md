@@ -88,6 +88,7 @@ Installer contract:
 - `vipm_project_path`: path to `.vipb` (or path accepted by `vipm build`).
 - `vipm_cli_url` + `vipm_cli_sha256`: optional VIPM CLI archive source/checksum used when workflow must build `linux_labview_image` locally.
 - `vipm_cli_archive_type`: archive type for `vipm_cli_url` (`tar.gz`/`tgz`/`zip`; default `tar.gz`).
+- `labview_community_edition`: enables LabVIEW Community Edition mode in Linux container runs (default `true`).
 
 ### Typical dispatch values
 - `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`

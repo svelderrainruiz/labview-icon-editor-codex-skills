@@ -69,6 +69,11 @@ on:
         required: false
         default: true
         type: boolean
+      labview_community_edition:
+        description: Enable LabVIEW Community Edition mode inside Linux containers.
+        required: false
+        default: true
+        type: boolean
       vipm_cli_url:
         description: Optional URL for VIPM CLI archive used when building linux_labview_image locally.
         required: false
@@ -132,6 +137,7 @@ jobs:
         env:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
           VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
           VIPM_CLI_SHA256: ${{ inputs.vipm_cli_sha256 }}
           VIPM_CLI_ARCHIVE_TYPE: ${{ inputs.vipm_cli_archive_type }}
@@ -228,6 +234,7 @@ jobs:
               -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
               -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.lvlibp" `
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
+              -e "LABVIEW_COMMUNITY_EDITION=$env:LABVIEW_COMMUNITY_EDITION" `
               "$env:LINUX_LABVIEW_IMAGE" `
               bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
             $buildExitCode = $LASTEXITCODE
@@ -314,6 +321,7 @@ jobs:
         shell: bash
         env:
           VIPM_COMMUNITY_EDITION: ${{ inputs.vipm_community_edition }}
+          LABVIEW_COMMUNITY_EDITION: ${{ inputs.labview_community_edition }}
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
           VIPM_PROJECT_PATH: ${{ inputs.vipm_project_path }}
           VIPM_CLI_URL: ${{ inputs.vipm_cli_url }}
@@ -360,6 +368,7 @@ jobs:
             -v "$GITHUB_WORKSPACE/consumer:/workspace" \
             -w /workspace \
             -e VIPM_COMMUNITY_EDITION="$VIPM_COMMUNITY_EDITION" \
+            -e LABVIEW_COMMUNITY_EDITION="$LABVIEW_COMMUNITY_EDITION" \
             -e VIPM_PROJECT_PATH_IN_CONTAINER="$vipm_project_path_in_container" \
             -e LINUX_LABVIEW_IMAGE="$LINUX_LABVIEW_IMAGE" \
             "$LINUX_LABVIEW_IMAGE" \
