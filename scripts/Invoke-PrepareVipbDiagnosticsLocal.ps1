@@ -150,7 +150,7 @@ if command -v timeout >/dev/null 2>&1; then
     -SourceSha '${actualConsumerSha}' \
     -BuildRunId 'local' \
     -BuildRunAttempt '1' \
-    -UpdateScriptPath '/workspace/scripts/Update-VipbDisplayInfo.ps1'
+    -UpdateScriptPath '/workspace/scripts/Update-Vipb.DisplayInfo.ps1'
 else
   pwsh -NoProfile -File /workspace/scripts/Invoke-PrepareVipbDiagnostics.ps1 \
     -RepoRoot '/workspace/consumer' \
@@ -171,7 +171,7 @@ else
     -SourceSha '${actualConsumerSha}' \
     -BuildRunId 'local' \
     -BuildRunAttempt '1' \
-    -UpdateScriptPath '/workspace/scripts/Update-VipbDisplayInfo.ps1'
+    -UpdateScriptPath '/workspace/scripts/Update-Vipb.DisplayInfo.ps1'
 fi
 "@
 

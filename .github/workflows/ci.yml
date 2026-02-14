@@ -693,7 +693,7 @@ jobs:
             -BuildRunId '${{ github.run_id }}' `
             -BuildRunAttempt '${{ github.run_attempt }}' `
             -ProfileResolutionPath (Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json') `
-            -UpdateScriptPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-VipbDisplayInfo.ps1')
+            -UpdateScriptPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-Vipb.DisplayInfo.ps1')
 
       - name: Publish VIPB diagnostics summary
         if: always()

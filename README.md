@@ -53,6 +53,7 @@ Installer contract:
   - `prepare-vipb-linux` treats `consumer/.lvversion` (source project) as authoritative for VIPB LabVIEW target.
   - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
   - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
+  - canonical updater script: `scripts/Update-Vipb.DisplayInfo.ps1`; compatibility shim `scripts/Update-VipbDisplayInfo.ps1` is deprecated and forwards to canonical.
 - Failure triage:
   - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
 - PPL source contract (CI Pipeline lane):

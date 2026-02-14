@@ -47,7 +47,7 @@ param(
     [string]$BuildRunId = $env:GITHUB_RUN_ID,
     [string]$BuildRunAttempt = $env:GITHUB_RUN_ATTEMPT,
 
-    [string]$UpdateScriptPath = 'scripts/Update-VipbDisplayInfo.ps1',
+    [string]$UpdateScriptPath = 'scripts/Update-Vipb.DisplayInfo.ps1',
 
     [string]$ProfileResolutionPath
 )
@@ -531,10 +531,10 @@ try {
         } | Select-Object -Last 1)
 
         if ($failureDetail.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($failureDetail[0])) {
-            throw "Update-VipbDisplayInfo.ps1 failed with exit code $LASTEXITCODE. $($failureDetail[0])"
+            throw "Update-Vipb.DisplayInfo.ps1 failed with exit code $LASTEXITCODE. $($failureDetail[0])"
         }
 
-        throw "Update-VipbDisplayInfo.ps1 failed with exit code $LASTEXITCODE."
+        throw "Update-Vipb.DisplayInfo.ps1 failed with exit code $LASTEXITCODE."
     }
 
     Copy-Item -LiteralPath $resolvedVipbPath -Destination $paths.after_snapshot_path -Force

@@ -11,7 +11,7 @@ Describe 'Invoke-PrepareVipbDiagnostics script contract' {
             throw "Required script missing: $script:scriptPath"
         }
 
-        $script:updateScriptPath = Join-Path $script:repoRoot 'scripts/Update-VipbDisplayInfo.ps1'
+        $script:updateScriptPath = Join-Path $script:repoRoot 'scripts/Update-Vipb.DisplayInfo.ps1'
         $script:scriptContent = Get-Content -LiteralPath $script:scriptPath -Raw
     }
 

@@ -3,16 +3,28 @@
 
 $ErrorActionPreference = 'Stop'
 
-Describe 'Update-VipbDisplayInfo script contract' {
+Describe 'Update-Vipb.DisplayInfo script contract' {
     BeforeAll {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
-        $script:scriptPath = Join-Path $script:repoRoot 'scripts/Update-VipbDisplayInfo.ps1'
+        $script:scriptPath = Join-Path $script:repoRoot 'scripts/Update-Vipb.DisplayInfo.ps1'
+        $script:legacyScriptPath = Join-Path $script:repoRoot 'scripts/Update-VipbDisplayInfo.ps1'
 
         if (-not (Test-Path -LiteralPath $script:scriptPath -PathType Leaf)) {
             throw "Required script missing: $script:scriptPath"
         }
+        if (-not (Test-Path -LiteralPath $script:legacyScriptPath -PathType Leaf)) {
+            throw "Required legacy shim missing: $script:legacyScriptPath"
+        }
 
         $script:scriptContent = Get-Content -LiteralPath $script:scriptPath -Raw
+        $script:legacyScriptContent = Get-Content -LiteralPath $script:legacyScriptPath -Raw
+    }
+
+    It 'keeps legacy shim with deprecation warning and canonical forwarding markers' {
+        $script:legacyScriptContent | Should -Match "Write-Warning"
+        $script:legacyScriptContent | Should -Match "deprecated"
+        $script:legacyScriptContent | Should -Match "Update-Vipb\.DisplayInfo\.ps1"
+        $script:legacyScriptContent | Should -Match '& \$canonicalScriptPath @PSBoundParameters'
     }
 
     It 'defines required parameters and output contracts' {
@@ -136,6 +148,98 @@ Describe 'Update-VipbDisplayInfo script contract' {
             $summary = Get-Content -LiteralPath $summaryPath -Raw
             $summary | Should -Match '## VIPB Metadata Delta'
             $summary | Should -Match '\| Field \| Changed \| Before \| After \|'
+        }
+        finally {
+            if (Test-Path -LiteralPath $tempRoot -PathType Container) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
+
+    It 'legacy shim delegates successfully and produces outputs' {
+        $tempRoot = Join-Path $env:TEMP ("vipb-update-shim-test-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        try {
+            $repoRootPath = Join-Path $tempRoot 'repo'
+            New-Item -Path $repoRootPath -ItemType Directory -Force | Out-Null
+            '26.0' | Set-Content -LiteralPath (Join-Path $repoRootPath '.lvversion') -Encoding ASCII
+            $vipbPath = Join-Path $tempRoot 'fixture.vipb'
+            $releaseNotesPath = Join-Path $tempRoot 'release_notes.md'
+            $diffPath = Join-Path $tempRoot 'vipb-diff.json'
+            $summaryPath = Join-Path $tempRoot 'vipb-diff-summary.md'
+
+            @'
+<VI_Package_Builder_Settings>
+  <Library_General_Settings>
+    <Library_Version>0.0.0.0</Library_Version>
+    <Package_LabVIEW_Version>26.0 (64-bit)</Package_LabVIEW_Version>
+    <Company_Name>old-company</Company_Name>
+    <Product_Name>old-product</Product_Name>
+  </Library_General_Settings>
+  <Advanced_Settings>
+    <Description>
+      <One_Line_Description_Summary>old-summary</One_Line_Description_Summary>
+      <Packager>old-packager</Packager>
+      <URL>https://example.invalid</URL>
+      <Copyright>old-copyright</Copyright>
+      <Release_Notes>old-notes</Release_Notes>
+      <Description>old-description</Description>
+    </Description>
+    <License_Agreement_Filepath>old-license</License_Agreement_Filepath>
+    <Source_Files>
+      <Exclusions>
+        <Path>builds</Path>
+      </Exclusions>
+    </Source_Files>
+  </Advanced_Settings>
+</VI_Package_Builder_Settings>
+'@ | Set-Content -LiteralPath $vipbPath -Encoding UTF8
+
+            'release notes fixture' | Set-Content -LiteralPath $releaseNotesPath -Encoding UTF8
+
+            $displayInfo = @{
+                'Package Version' = @{
+                    major = 0
+                    minor = 1
+                    patch = 0
+                    build = 123
+                }
+                'Company Name' = 'fixture-company'
+                'Product Name' = 'fixture-product'
+                'Product Description Summary' = 'fixture-summary'
+                'Product Description' = 'fixture-description'
+                'Author Name (Person or Company)' = 'fixture-author'
+                'Product Homepage (URL)' = 'https://github.com/example/repo'
+                'Legal Copyright' = 'fixture-copyright'
+                'Release Notes - Change Log' = 'release notes fixture'
+            } | ConvertTo-Json -Depth 6 -Compress
+
+            $warningOutput = & $script:legacyScriptPath `
+                -RepoRoot $repoRootPath `
+                -VipbPath $vipbPath `
+                -ReleaseNotesFile $releaseNotesPath `
+                -DisplayInformationJson $displayInfo `
+                -LabVIEWVersionYear 2026 `
+                -LabVIEWMinorRevision 0 `
+                -SupportedBitness '64' `
+                -Major 0 `
+                -Minor 1 `
+                -Patch 0 `
+                -Build 123 `
+                -Commit 'abc123' `
+                -DiffOutputPath $diffPath `
+                -SummaryMarkdownPath $summaryPath 3>&1
+
+            $warningText = @($warningOutput) -join [Environment]::NewLine
+            $warningText | Should -Match 'deprecated'
+            $warningText | Should -Match 'Update-Vipb\.DisplayInfo\.ps1'
+
+            Test-Path -LiteralPath $diffPath -PathType Leaf | Should -BeTrue
+            Test-Path -LiteralPath $summaryPath -PathType Leaf | Should -BeTrue
+
+            $diff = Get-Content -LiteralPath $diffPath -Raw | ConvertFrom-Json
+            [int]$diff.changed_field_count | Should -BeGreaterThan 0
+            @($diff.changed_fields) | Should -Contain 'Library_Version'
         }
         finally {
             if (Test-Path -LiteralPath $tempRoot -PathType Container) {
