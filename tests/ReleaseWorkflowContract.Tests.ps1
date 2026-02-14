@@ -61,6 +61,9 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'lvie-ppl-bundle-linux-x64\.zip'
         $script:releaseContent | Should -Match 'lvie-vip-package-self-hosted\.zip'
         $script:releaseContent | Should -Match 'release-provenance\.json'
+        $script:releaseContent | Should -Match 'release-payload-manifest\.json'
+        $script:releaseContent | Should -Match 'New-ReleasePayloadManifest\.ps1'
+        $script:releaseContent | Should -Match 'schemas/release-payload-contract\.schema\.json'
         $script:releaseContent | Should -Match 'gh release upload'
         $script:releaseContent | Should -Match 'gh release create'
     }

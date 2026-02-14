@@ -76,3 +76,12 @@ Compatibility-only (deprecated) inputs:
 - `.github/workflows/release-skill-layer.yml`
 - `docs/agents/release-gates.md`
 
+## 8) Release payload files
+When `release-skill-layer` publishes a tag, expect:
+- `lvie-codex-skill-layer-installer.exe`
+- `lvie-ppl-bundle-windows-x64.zip`
+- `lvie-ppl-bundle-linux-x64.zip`
+- `lvie-vip-package-self-hosted.zip`
+- `release-provenance.json`
+- `release-payload-manifest.json`
+

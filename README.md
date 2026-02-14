@@ -28,6 +28,7 @@ CI-gated release contract:
   - `lvie-ppl-bundle-linux-x64.zip`
   - `lvie-vip-package-self-hosted.zip`
   - `release-provenance.json`
+  - `release-payload-manifest.json`
 
 Installer contract:
 - Canonical NSIS root: `C:\Program Files (x86)\NSIS`

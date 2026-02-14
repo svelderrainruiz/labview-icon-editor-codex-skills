@@ -50,7 +50,8 @@ Describe 'Agent docs contract' {
             'docker-contract-ppl-bundle-windows-x64-<run_id>',
             'docker-contract-ppl-bundle-linux-x64-<run_id>',
             'docker-contract-vip-package-self-hosted-<run_id>',
-            'codex-skill-layer'
+            'codex-skill-layer',
+            'release-payload-manifest.json'
         )) {
             $content | Should -Match ([regex]::Escape($artifact))
         }

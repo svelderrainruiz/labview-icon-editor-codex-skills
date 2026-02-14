@@ -248,6 +248,32 @@ jobs:
           }
           $provenance | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $provenancePath -Encoding UTF8
 
+          $payloadManifestScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/New-ReleasePayloadManifest.ps1'
+          if (-not (Test-Path -LiteralPath $payloadManifestScript -PathType Leaf)) {
+            throw "Release payload manifest script not found: $payloadManifestScript"
+          }
+          $payloadManifestSchema = Join-Path $env:GITHUB_WORKSPACE 'schemas/release-payload-contract.schema.json'
+          if (-not (Test-Path -LiteralPath $payloadManifestSchema -PathType Leaf)) {
+            throw "Release payload manifest schema not found: $payloadManifestSchema"
+          }
+          $payloadManifestPath = Join-Path $stageDir 'release-payload-manifest.json'
+
+          & $payloadManifestScript `
+            -ReleaseTag $releaseTag `
+            -StageDirectory $stageDir `
+            -SourceProjectRepo '${{ inputs.consumer_repo }}' `
+            -SourceProjectRef '${{ inputs.consumer_ref }}' `
+            -SourceProjectSha '${{ inputs.consumer_sha }}' `
+            -CiRepository '${{ github.repository }}' `
+            -CiRunId '${{ github.run_id }}' `
+            -CiRunAttempt '${{ github.run_attempt }}' `
+            -CiRunUrl 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}' `
+            -OutputPath $payloadManifestPath `
+            -SchemaPath $payloadManifestSchema
+
+          $provenanceSha = (Get-FileHash -LiteralPath $provenancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $payloadManifestSha = (Get-FileHash -LiteralPath $payloadManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           $notes = @(
             'Layered Codex skill asset for labview-icon-editor.',
@@ -257,6 +283,8 @@ jobs:
             "- lvie-ppl-bundle-windows-x64.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-ppl-bundle-windows-x64.zip' } | Select-Object -ExpandProperty sha256))",
             "- lvie-ppl-bundle-linux-x64.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-ppl-bundle-linux-x64.zip' } | Select-Object -ExpandProperty sha256))",
             "- lvie-vip-package-self-hosted.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-vip-package-self-hosted.zip' } | Select-Object -ExpandProperty sha256))",
+            "- release-provenance.json (SHA256: $provenanceSha)",
+            "- release-payload-manifest.json (SHA256: $payloadManifestSha)",
             '',
             'CI provenance:',
             '- skills_ci_repo: ${{ github.repository }}',

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svelderrainruiz.github.io/labview-icon-editor-codex-skills/schemas/release-payload-contract.schema.json",
+  "title": "Release Payload Contract Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_utc",
+    "release_tag",
+    "source_project",
+    "skills_ci_run",
+    "assets"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "release_tag": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "ref",
+        "sha"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "skills_ci_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "run_id",
+        "run_attempt",
+        "run_url"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_attempt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sha256",
+          "size_bytes",
+          "category"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "installer",
+              "ppl_bundle_windows_x64",
+              "ppl_bundle_linux_x64",
+              "vip_package_self_hosted",
+              "provenance"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

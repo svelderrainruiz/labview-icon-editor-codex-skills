@@ -20,6 +20,15 @@ From skills repo CI run metadata:
 - docker-contract-vip-package-self-hosted-<run_id>
 - codex-skill-layer
 
+## Release payload contract
+Release publish must include these files:
+- lvie-codex-skill-layer-installer.exe
+- lvie-ppl-bundle-windows-x64.zip
+- lvie-ppl-bundle-linux-x64.zip
+- lvie-vip-package-self-hosted.zip
+- release-provenance.json
+- release-payload-manifest.json
+
 ## Job failure set
 Any job with one of these conclusions fails the gate:
 - failure
