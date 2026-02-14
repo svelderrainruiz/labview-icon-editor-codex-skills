@@ -1,0 +1,45 @@
+name: docker-contract-ci
+
+on:
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'schemas/**'
+      - 'scripts/**'
+      - 'vipm-cli-machine/**'
+      - 'docker/**'
+      - 'docs/**'
+      - 'manifest.json'
+      - 'README.md'
+      - '.github/workflows/docker-contract-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-contract-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run contract tests in Docker
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
+            -DockerImage 'mcr.microsoft.com/powershell:7.4-ubuntu-22.04' `
+            -TestPath './tests/*.Tests.ps1'
+
+      - name: Build NI image with PowerShell and pinned Pester
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t nationalinstruments/labview:2026q1-linux-pwsh -f docker/ni-lv-pwsh.Dockerfile .
+
+      - name: Run VIPM activation contract tests on NI image
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
+            -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' `
+            -TestPath './tests/VipmCliActivationContract.Tests.ps1'

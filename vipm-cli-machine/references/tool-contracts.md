@@ -11,6 +11,7 @@ Use `vipm help <command>` for authoritative syntax checks before composing run-m
 Helper preflight contract:
 - `vipm` must be available on `PATH`.
 - command timeout defaults to `120` seconds (`LVIE_VIPM_COMMAND_TIMEOUT_SECONDS` override).
+- activation gate: when `VIPM_COMMUNITY_EDITION=true` (or `1`/`yes`/`on`), run `vipm activate` before any probe/run command.
 
 ## Command Forms
 - About:
@@ -48,6 +49,15 @@ Timeout behavior:
 - Timeout classification:
   - `probe`: `probe-fail`
   - `run`: `run-failure`
+
+Community activation behavior:
+- `VIPM_COMMUNITY_EDITION=true` triggers `vipm activate` once per invocation before tool execution.
+- Activation must exit with code `0`; otherwise helper fails fast.
+- Activation metadata is emitted in JSON payload fields:
+  - `activation_attempted`
+  - `activation_exit_code`
+  - `activation_timed_out`
+  - `activation_stderr_preview`
 
 ## Version Normalization
 Accepted inputs:
