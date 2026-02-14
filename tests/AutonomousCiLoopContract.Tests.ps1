@@ -27,4 +27,10 @@ Describe 'Autonomous CI loop contract' {
         $script:loopContent | Should -Match 'record\.workflow_run\.head_sha_expected'
         $script:loopContent | Should -Match 'record\.workflow_run\.head_sha_actual'
     }
+
+    It 'defaults consumer_ref to develop when input is not explicitly provided' {
+        $script:loopContent | Should -Match 'hasConsumerRefInput'
+        $script:loopContent | Should -Match '\$key\s*-eq\s*''consumer_ref'''
+        $script:loopContent | Should -Match '\$normalizedWorkflowInputs\s*\+=\s*''consumer_ref=develop'''
+    }
 }
