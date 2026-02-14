@@ -35,12 +35,13 @@ Installer contract:
 
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
-- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, prepare deterministic VIPB metadata on Linux, then build a native self-hosted Windows VI package.
+- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, then build a native self-hosted Windows VI package.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
 - Pipeline order:
   - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
-  - `contract-tests` -> `prepare-vipb-linux`
+  - `contract-tests` -> `gather-release-notes`
+  - `contract-tests` + `gather-release-notes` -> `prepare-vipb-linux`
   - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
 - PPL source contract (CI Pipeline lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
@@ -67,16 +68,32 @@ Installer contract:
   - `docker-contract-ppl-bundle-linux-<run_id>` containing:
     - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-release-notes-<run_id>` containing:
+    - `release_notes.md`
+    - `release-notes-manifest.json` (SHA256 and size for the gathered release notes payload)
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
-    - prepared `NI Icon editor.vipb`
-    - `vipb-diff.json` (field-level before/after delta)
-    - `vipb-diff-summary.md` (summary table written to workflow run summary)
+    - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
+    - `vipb.before.xml`, `vipb.after.xml`
+    - `vipb.before.sha256`, `vipb.after.sha256`
+    - `vipb-diff.json`, `vipb-diff-summary.md`
+    - `vipb-diagnostics.json`, `vipb-diagnostics-summary.md`
+    - `prepare-vipb.status.json`, `prepare-vipb.error.json` (failure path)
+    - `prepare-vipb.log`
+    - `display-information.input.json`
   - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
     - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
+- Local diagnostics suite exercise (bounded Docker):
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PrepareVipbDiagnosticsLocal.ps1`
+  - Default bounds: `--memory=3g`, `--cpus=2`, timeout `300s`.
+  - Fast triage order:
+    1. `vipb-diagnostics-summary.md`
+    2. `vipb-diagnostics.json`
+    3. `prepare-vipb.log`
+    4. `vipb.before.xml` vs `vipb.after.xml`
 - Local run (NI LabVIEW Linux image already on this machine):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux' -BootstrapPowerShell`
 - Deterministic NI local iteration (recommended):

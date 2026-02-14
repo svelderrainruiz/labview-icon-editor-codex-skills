@@ -356,9 +356,68 @@ jobs:
           path: ${{ runner.temp }}/ppl-bundle-linux
           if-no-files-found: error
 
-  prepare-vipb-linux:
+  gather-release-notes:
     runs-on: ubuntu-latest
     needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - name: Gather release notes artifact content
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseNotesBundleDir = Join-Path $env:RUNNER_TEMP 'release-notes-prepared'
+          if (Test-Path -LiteralPath $releaseNotesBundleDir) {
+            Remove-Item -LiteralPath $releaseNotesBundleDir -Recurse -Force
+          }
+          New-Item -Path $releaseNotesBundleDir -ItemType Directory -Force | Out-Null
+
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          }
+          $bundleReleaseNotesPath = Join-Path $releaseNotesBundleDir 'release_notes.md'
+          Copy-Item -LiteralPath $releaseNotesPath -Destination $bundleReleaseNotesPath -Force
+
+          $item = Get-Item -LiteralPath $bundleReleaseNotesPath
+          $sha = (Get-FileHash -LiteralPath $bundleReleaseNotesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [pscustomobject]@{
+            generated_utc = (Get-Date).ToUniversalTime().ToString('o')
+            source_sha = $env:GITHUB_SHA
+            source_repository = $env:GITHUB_REPOSITORY
+            file_name = 'release_notes.md'
+            sha256 = $sha
+            size_bytes = [int64]$item.Length
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $releaseNotesBundleDir 'release-notes-manifest.json') -Encoding UTF8
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-release-notes-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-notes-prepared
+          if-no-files-found: error
+
+  prepare-vipb-linux:
+    runs-on: ubuntu-latest
+    needs: [contract-tests, gather-release-notes]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -399,14 +458,22 @@ jobs:
           "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
 
-      - name: Ensure release notes file exists
+      - name: Download release notes artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-release-notes-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-notes-prepared
+
+      - name: Install gathered release notes for VIPB preparation
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
-          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
-            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          $sourceReleaseNotesPath = Join-Path $env:RUNNER_TEMP 'release-notes-prepared/release_notes.md'
+          if (-not (Test-Path -LiteralPath $sourceReleaseNotesPath -PathType Leaf)) {
+            throw "Gathered release notes artifact is missing '$sourceReleaseNotesPath'."
           }
+          $targetReleaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          Copy-Item -LiteralPath $sourceReleaseNotesPath -Destination $targetReleaseNotesPath -Force
 
       - id: display-info
         name: Generate VIP display information JSON
@@ -441,7 +508,9 @@ jobs:
           $json = $info | ConvertTo-Json -Depth 6 -Compress
           "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Prepare VIPB metadata deterministically
+      - id: vipb_diag
+        name: Run VIPB diagnostics suite
+        continue-on-error: true
         shell: pwsh
         env:
           DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
@@ -453,18 +522,9 @@ jobs:
           }
           New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
 
-          $vipbPath = Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH
-          if (-not (Test-Path -LiteralPath $vipbPath -PathType Leaf)) {
-            throw "VIPB path not found at '$vipbPath'."
-          }
-
-          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
-          $diffPath = Join-Path $bundleDir 'vipb-diff.json'
-          $summaryPath = Join-Path $bundleDir 'vipb-diff-summary.md'
-
-          & "$env:GITHUB_WORKSPACE/scripts/Update-VipbDisplayInfo.ps1" `
-            -VipbPath $vipbPath `
-            -ReleaseNotesFile $releaseNotesPath `
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PrepareVipbDiagnostics.ps1" `
+            -VipbPath (Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH) `
+            -ReleaseNotesFile (Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md') `
             -DisplayInformationJson $env:DISPLAY_INFORMATION_JSON `
             -LabVIEWVersionYear '${{ steps.labview-version.outputs.year }}' `
             -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
@@ -474,16 +534,19 @@ jobs:
             -Patch $env:VERSION_PATCH `
             -Build $env:VERSION_BUILD `
             -Commit $env:VERSION_COMMIT `
-            -DiffOutputPath $diffPath `
-            -SummaryMarkdownPath $summaryPath
+            -OutputDirectory $bundleDir `
+            -SourceRepository '${{ github.repository }}' `
+            -SourceRef '${{ github.ref }}' `
+            -SourceSha '${{ github.sha }}' `
+            -BuildRunId '${{ github.run_id }}' `
+            -BuildRunAttempt '${{ github.run_attempt }}' `
+            -UpdateScriptPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-VipbDisplayInfo.ps1')
 
-          Copy-Item -LiteralPath $vipbPath -Destination (Join-Path $bundleDir 'NI Icon editor.vipb') -Force
-
-      - name: Publish VIPB change summary
+      - name: Publish VIPB diagnostics summary
         if: always()
         shell: pwsh
         run: |
-          $summaryPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/vipb-diff-summary.md'
+          $summaryPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/vipb-diagnostics-summary.md'
           if (Test-Path -LiteralPath $summaryPath -PathType Leaf) {
             Get-Content -LiteralPath $summaryPath -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             @(
@@ -493,9 +556,9 @@ jobs:
             ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           } else {
             @(
-              '## VIPB Metadata Delta'
+              '## VIPB Diagnostics Suite'
               ''
-              '- Status: failed (summary not generated)'
+              '- Status: failed (diagnostics summary not generated)'
               '- Expected summary path: `' + $summaryPath + '`'
               '- Expected artifact: `docker-contract-vipb-prepared-linux-${{ github.run_id }}`'
               '- Source: `runner.temp/vipb-prepared-linux`'
@@ -503,11 +566,34 @@ jobs:
           }
 
       - name: Upload prepared VIPB artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: docker-contract-vipb-prepared-linux-${{ github.run_id }}
           path: ${{ runner.temp }}/vipb-prepared-linux
           if-no-files-found: error
+
+      - name: Fail if VIPB diagnostics suite failed
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $statusPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/prepare-vipb.status.json'
+          if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) {
+            throw "VIPB diagnostics status file missing: $statusPath"
+          }
+
+          $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+          $status = [string]$statusPayload.status
+          if ($status -eq 'failed') {
+            $errorPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/prepare-vipb.error.json'
+            throw "VIPB diagnostics suite failed. See '$errorPath'."
+          }
+
+          if ('${{ steps.vipb_diag.outcome }}' -eq 'failure') {
+            throw "VIPB diagnostics execution step failed despite non-failed status '$status'."
+          }
+          Write-Host "VIPB diagnostics suite completed with status '$status'."
 
   build-vip-self-hosted:
     runs-on: [self-hosted, windows, self-hosted-windows-lv]

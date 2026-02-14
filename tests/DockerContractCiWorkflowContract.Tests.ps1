@@ -20,17 +20,20 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match '\.github/workflows/ci\.yml'
     }
 
-    It 'defines ordered contract-tests then windows or linux build jobs plus linux VIPB prep then self-hosted package jobs' {
+    It 'defines ordered contract-tests then windows or linux build jobs plus release-notes and VIPB prep then self-hosted package jobs' {
         $script:workflowContent | Should -Match 'contract-tests:'
         $script:workflowContent | Should -Match 'build-ppl-windows:'
         $script:workflowContent | Should -Match 'build-ppl-linux:'
+        $script:workflowContent | Should -Match 'gather-release-notes:'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-ppl-windows\]'
+        $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
+        $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
-        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*gather-release-notes\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-ppl-windows,\s*build-ppl-linux,\s*prepare-vipb-linux\]'
     }
@@ -45,10 +48,20 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'LINUX_PPL_OUTPUT_PATH:\s*consumer/resource/plugins/lv_icon\.linux\.lvlibp'
     }
 
-    It 'checks out consumer and validates expected SHA in PPL and VIPB prep jobs' {
-        ([regex]::Matches($script:workflowContent, 'Checkout consumer repository')).Count | Should -BeGreaterOrEqual 3
-        ([regex]::Matches($script:workflowContent, 'Verify checked out consumer SHA')).Count | Should -BeGreaterOrEqual 3
+    It 'checks out consumer and validates expected SHA in PPL, release-notes, and VIPB prep jobs' {
+        ([regex]::Matches($script:workflowContent, 'Checkout consumer repository')).Count | Should -BeGreaterOrEqual 4
+        ([regex]::Matches($script:workflowContent, 'Verify checked out consumer SHA')).Count | Should -BeGreaterOrEqual 4
         $script:workflowContent | Should -Match 'Consumer SHA mismatch'
+    }
+
+    It 'gathers release notes in a dedicated artifact job for VIPB prep consumption' {
+        $script:workflowContent | Should -Match 'gather-release-notes:'
+        $script:workflowContent | Should -Match 'Gather release notes artifact content'
+        $script:workflowContent | Should -Match 'Upload release notes artifact'
+        $script:workflowContent | Should -Match 'docker-contract-release-notes-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'Download release notes artifact'
+        $script:workflowContent | Should -Match 'Install gathered release notes for VIPB preparation'
+        $script:workflowContent | Should -Match 'release_notes\.md'
     }
 
     It 'builds windows PPL in windows container and uploads windows bundle artifact' {
@@ -75,15 +88,19 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'Upload Linux PPL bundle artifact'
     }
 
-    It 'prepares VIPB metadata on linux and emits summary plus artifact' {
+    It 'runs VIPB diagnostics suite on linux and emits summary plus artifact' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:'
-        $script:workflowContent | Should -Match 'Prepare VIPB metadata deterministically'
-        $script:workflowContent | Should -Match 'scripts/Update-VipbDisplayInfo\.ps1'
-        $script:workflowContent | Should -Match 'Publish VIPB change summary'
+        $script:workflowContent | Should -Match 'Run VIPB diagnostics suite'
+        $script:workflowContent | Should -Match 'continue-on-error:\s*true'
+        $script:workflowContent | Should -Match 'scripts/Invoke-PrepareVipbDiagnostics\.ps1'
+        $script:workflowContent | Should -Match 'Publish VIPB diagnostics summary'
         $script:workflowContent | Should -Match 'GITHUB_STEP_SUMMARY'
-        $script:workflowContent | Should -Match 'Artifact:\s*`docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}`'
+        $script:workflowContent | Should -Match 'vipb-diagnostics-summary\.md'
         $script:workflowContent | Should -Match 'Upload prepared VIPB artifact'
+        $script:workflowContent | Should -Match 'Upload prepared VIPB artifact\s*[\s\S]*?if:\s*always\(\)'
         $script:workflowContent | Should -Match 'docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'Fail if VIPB diagnostics suite failed'
+        $script:workflowContent | Should -Match 'prepare-vipb\.status\.json'
     }
 
     It 'creates manifests for both windows and linux bundles' {
@@ -110,6 +127,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'actions/download-artifact@v4'
         $script:workflowContent | Should -Match 'Consume prepared VIPB from Linux artifact'
         $script:workflowContent | Should -Match 'docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'NI Icon editor\.vipb'
         $script:workflowContent | Should -Match 'Consume Windows-built x64 PPL bundle'
         $script:workflowContent | Should -Match 'Invoke-PplBundleConsume\.ps1'
         $script:workflowContent | Should -Match 'lv_icon_x64\.lvlibp'
