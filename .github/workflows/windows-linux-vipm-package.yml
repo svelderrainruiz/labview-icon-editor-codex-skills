@@ -11,7 +11,7 @@ on:
       consumer_ref:
         description: Consumer ref (branch/tag/SHA) to build/package.
         required: true
-        default: main
+        default: develop
         type: string
       windows_labview_image:
         description: Windows LabVIEW Docker image used to build the PPL.
