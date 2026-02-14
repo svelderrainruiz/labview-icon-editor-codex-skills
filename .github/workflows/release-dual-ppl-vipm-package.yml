@@ -24,13 +24,13 @@ on:
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
       windows_build_lane:
-        description: Windows PPL producer lane. Use linux-container when Windows Docker is unavailable.
+        description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
         required: true
         default: linux-container
         type: choice
         options:
           - linux-container
-          - windows-container
+          - windows-hosted
       windows_build_command:
         description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
         required: false
@@ -107,7 +107,7 @@ on:
         default: nationalinstruments/labview:2026q1-linux-pwsh
         type: string
       windows_build_lane:
-        description: Windows PPL producer lane. Use linux-container when Windows Docker is unavailable.
+        description: Windows PPL producer lane. Use windows-hosted to run on GitHub-hosted Windows.
         required: false
         default: linux-container
         type: string
@@ -180,7 +180,7 @@ permissions:
 
 jobs:
   build-ppl-windows:
-    runs-on: ${{ inputs.windows_build_lane == 'windows-container' && fromJSON('["self-hosted","windows","self-hosted-windows-lv"]') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.windows_build_lane == 'windows-hosted' && 'windows-latest' || 'ubuntu-latest' }}
     outputs:
       ppl_sha256: ${{ steps.bundle.outputs.ppl_sha256 }}
       artifact_name: ${{ steps.bundle.outputs.artifact_name }}
@@ -228,7 +228,7 @@ jobs:
             Write-Host $customCommand
             Invoke-Expression $customCommand
           }
-          elseif ('${{ inputs.windows_build_lane }}' -eq 'windows-container') {
+          elseif ('${{ inputs.windows_build_lane }}' -eq 'windows-hosted') {
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
             docker run --rm `
               -v "${consumerWorkspace}:C:\workspace" `
