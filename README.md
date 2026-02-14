@@ -51,6 +51,25 @@ Installer contract:
     - Image install path: `/usr/local/bin/vipm`
   - Run tests: `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh'`
 
+### Local Linux VIPC Apply (VIPM CLI)
+- Helper: `scripts/Invoke-ApplyVipcLinuxLocal.ps1`
+- Purpose: apply `consumer/.github/actions/apply-vipc/runner_dependencies.vipc` inside a Linux container using VIPM CLI.
+- Deterministic source defaults:
+  - `consumer_repo`: `svelderrainruiz/labview-icon-editor`
+  - `consumer_ref`: `patch/456-2020-migration-branch-from-9e46ecf`
+  - `consumer_expected_sha`: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
+- Prerequisites:
+  - Docker Desktop Linux containers engine
+  - `VIPM_CLI_URL` and `VIPM_CLI_SHA256` values when base image does not already include `vipm`
+- Example:
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-ApplyVipcLinuxLocal.ps1 -VipmCliUrl '<artifact-url>' -VipmCliSha256 '<sha256>'`
+- Outputs:
+  - `artifacts/vipm-vipc-apply/<utc>/vipm-apply.log`
+  - `artifacts/vipm-vipc-apply/<utc>/vipm-apply.result.json`
+- Notes:
+  - VIPC target version `20.0` is auto-normalized to LabVIEW year `2020` unless `-LabVIEWVersion` is provided.
+  - The helper records diagnostics first, then exits non-zero if `vipm install` fails.
+
 ### What to test after image changes
 - Verify tools in image:
   - `docker run --rm nationalinstruments/labview:2026q1-linux-pwsh pwsh -NoProfile -Command "$PSVersionTable.PSVersion.ToString(); (Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1).Version.ToString()"`
