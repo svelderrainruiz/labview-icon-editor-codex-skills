@@ -133,6 +133,40 @@ function Get-NormalizedWorkflowInputs {
   return @($result | Where-Object { $_ -like '*=*' })
 }
 
+function Get-VipmHelpPreviewEvidence {
+  param(
+    [Parameter(Mandatory)]
+    [long]$RunId,
+
+    [Parameter(Mandatory)]
+    [string]$Conclusion
+  )
+
+  $source = if ($Conclusion -eq 'success') { '--log' } else { '--log-failed' }
+  $logArgs = @('run', 'view', "$RunId", $source)
+  $logResult = Invoke-External -FilePath 'gh' -Arguments $logArgs
+
+  if ($logResult.ExitCode -ne 0) {
+    return [ordered]@{
+      observed = $false
+      usage_line_observed = $false
+      source = $source
+      check_error = (($logResult.Output -join "`n").Trim())
+    }
+  }
+
+  $logText = ($logResult.Output -join "`n")
+  $previewObserved = $logText -match 'vipm help preview \(first 20 lines\):'
+  $usageObserved = $logText -match '(?im)^\s*usage:\s+vipm\s+<command>' -or $logText -match '(?im)^\s*usage:\s+vipm\b'
+
+  return [ordered]@{
+    observed = $previewObserved
+    usage_line_observed = $usageObserved
+    source = $source
+    check_error = $null
+  }
+}
+
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -Path $repoRoot
 
@@ -210,6 +244,12 @@ while ($true) {
       status = $null
       conclusion = $null
       failed_jobs = @()
+      vipm_help_preview = [ordered]@{
+        observed = $false
+        usage_line_observed = $false
+        source = $null
+        check_error = $null
+      }
     }
     succeeded = $false
   }
@@ -297,6 +337,8 @@ while ($true) {
         )
       }
 
+      $record.workflow_run.vipm_help_preview = Get-VipmHelpPreviewEvidence -RunId $runId -Conclusion ([string]$run.conclusion)
+
       break
     }
 
@@ -312,6 +354,8 @@ while ($true) {
     status = $record.workflow_run.status
     conclusion = $record.workflow_run.conclusion
     failed_jobs = @($record.workflow_run.failed_jobs).Count
+    vipm_help_observed = [bool]$record.workflow_run.vipm_help_preview.observed
+    vipm_help_usage_line_observed = [bool]$record.workflow_run.vipm_help_preview.usage_line_observed
     run_url = $record.workflow_run.url
   }
   $summary | ConvertTo-Json -Depth 4

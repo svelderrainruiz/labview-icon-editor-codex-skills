@@ -622,6 +622,12 @@ jobs:
                 exit 1
               fi
 
+              echo "vipm help preview (first 20 lines):" >&2
+              if ! (vipm help 2>&1 || vipm --help 2>&1) | sed -n "1,20p" >&2; then
+                echo "Unable to print vipm help output from resolved vipm binary." >&2
+                exit 1
+              fi
+
               if [[ "$VIPM_COMMUNITY_EDITION" == "true" || "$VIPM_COMMUNITY_EDITION" == "1" || "$VIPM_COMMUNITY_EDITION" == "yes" || "$VIPM_COMMUNITY_EDITION" == "on" ]]; then
                 vipm activate
               fi

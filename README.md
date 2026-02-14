@@ -130,3 +130,4 @@ Installer contract:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux -VipmCliUrl "<artifact-url>" -VipmCliSha256 "<sha256>" -VipmCliArchiveType tar.gz`
 - Optional JSONL log output:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
+  - Each cycle now records `workflow_run.vipm_help_preview` with `observed`, `usage_line_observed`, `source`, and `check_error`.

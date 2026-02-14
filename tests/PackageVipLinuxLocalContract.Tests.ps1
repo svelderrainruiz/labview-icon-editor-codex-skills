@@ -34,6 +34,8 @@ Describe 'Local package-vip-linux helper contract' {
         $script:helperContent | Should -Match 'PATH=\$PATH'
         $script:helperContent | Should -Match "vipm lookup: \$\(command -v vipm \|\| echo not-found\)"
         $script:helperContent | Should -Match 'vipm search roots: /usr/local/bin /usr/bin /opt /usr/local/natinst'
+        $script:helperContent | Should -Match 'vipm help preview \(first 20 lines\):'
+        $script:helperContent | Should -Match 'vipm help 2>&1 \|\| vipm --help 2>&1'
         $script:helperContent | Should -Match 'docker build --build-arg VIPM_CLI_URL=ARTIFACT_URL'
         $script:helperContent | Should -Match '--build-arg VIPM_CLI_SHA256=SHA256'
     }
