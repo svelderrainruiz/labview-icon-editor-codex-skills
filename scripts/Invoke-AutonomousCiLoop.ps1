@@ -221,6 +221,20 @@ $normalizedWorkflowInputs = @(
     Sort-Object
 )
 
+$hasConsumerRefInput = @($normalizedWorkflowInputs | Where-Object {
+  $entry = [string]$_
+  if (-not $entry.Contains('=')) {
+    return $false
+  }
+
+  $key = ($entry -split '=', 2)[0].Trim().ToLowerInvariant()
+  return $key -eq 'consumer_ref'
+}).Count -gt 0
+
+if (-not $hasConsumerRefInput) {
+  $normalizedWorkflowInputs += 'consumer_ref=develop'
+}
+
 $cycle = 0
 while ($true) {
   $cycle += 1

@@ -123,6 +123,7 @@ Installer contract:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
 - Pass workflow dispatch inputs (`key=value`) repeatedly:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=develop"`
+  - If `consumer_ref` is omitted, the loop now defaults it to `develop`.
 - Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
   - Profile injects both `windows_build_command` and `linux_build_command` stubs so parallel PPL jobs can complete without consumer parity scripts.
