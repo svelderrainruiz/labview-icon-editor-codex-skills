@@ -97,7 +97,7 @@ Installer contract:
 - `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`
 - `linux_labview_image`: `nationalinstruments/labview:2026q1-linux-pwsh`
 - `consumer_repo`: `svelderrainruiz/labview-icon-editor`
-- `consumer_ref`: `main` (or release branch/SHA)
+- `consumer_ref`: `develop` (or release branch/SHA)
 - `windows_build_command`: `` (empty => auto build command)
 - `windows_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
 - `linux_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
@@ -122,7 +122,7 @@ Installer contract:
 - Typical bounded smoke run (1 cycle, stop on failure):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
 - Pass workflow dispatch inputs (`key=value`) repeatedly:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=main"`
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=develop"`
 - Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
   - Profile injects both `windows_build_command` and `linux_build_command` stubs so parallel PPL jobs can complete without consumer parity scripts.
