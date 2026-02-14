@@ -90,6 +90,24 @@ jobs:
           ref: ${{ inputs.consumer_ref }}
           path: consumer
 
+      - name: Preflight Linux container parity assets
+        if: ${{ inputs.ppl_build_lane == 'linux-container' && inputs.windows_build_command == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/consumer/Tooling/container-parity"
+          run_script="$root/runlabview-linux.sh"
+          dev_script="$root/devmode-linux.sh"
+
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer checkout." >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: use a consumer_ref that contains Tooling/container-parity files." >&2
+            ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
+            exit 1
+          fi
+
       - name: Build PPL in Windows image
         shell: pwsh
         env:
@@ -174,7 +192,7 @@ jobs:
               -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.lvlibp" `
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:LINUX_LABVIEW_IMAGE" `
-              bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
+              bash -lc 'set -euo pipefail; script_dir=/workspace/Tooling/container-parity; run_script=$script_dir/runlabview-linux.sh; dev_script=$script_dir/devmode-linux.sh; if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then echo "Missing required container parity scripts in consumer repo:" >&2; echo "  expected: $run_script" >&2; echo "  expected: $dev_script" >&2; echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2; ls -la /workspace/Tooling >&2 || true; exit 127; fi; chmod +x "$run_script" "$dev_script"; "$run_script"'
             $buildExitCode = $LASTEXITCODE
           }
 
