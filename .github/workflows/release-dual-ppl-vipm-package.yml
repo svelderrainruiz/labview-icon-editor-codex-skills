@@ -76,6 +76,91 @@ on:
         required: false
         default: true
         type: boolean
+  workflow_call:
+    inputs:
+      consumer_repo:
+        description: Consumer repository that owns the LabVIEW project.
+        required: false
+        default: svelderrainruiz/labview-icon-editor
+        type: string
+      consumer_ref:
+        description: Consumer ref (branch/tag/SHA) to build/package.
+        required: false
+        default: main
+        type: string
+      windows_labview_image:
+        description: Windows NI LabVIEW Docker image used to build Windows PPL.
+        required: false
+        default: nationalinstruments/labview:2026q1-windows
+        type: string
+      linux_labview_image:
+        description: Linux NI LabVIEW Docker image used to build Linux PPL and VI package.
+        required: false
+        default: nationalinstruments/labview:2026q1-linux-pwsh
+        type: string
+      windows_build_command:
+        description: Optional custom command for Windows PPL build. Leave blank to use built-in container parity command.
+        required: false
+        default: ''
+        type: string
+      linux_build_command:
+        description: Optional custom command for Linux PPL build. Leave blank to use built-in container parity command.
+        required: false
+        default: ''
+        type: string
+      windows_ppl_output_path:
+        description: Relative path to the built PPL produced by Windows build.
+        required: false
+        default: consumer/resource/plugins/lv_icon.windows.lvlibp
+        type: string
+      linux_ppl_output_path:
+        description: Relative path to the built PPL produced by Linux build.
+        required: false
+        default: consumer/resource/plugins/lv_icon.linux.lvlibp
+        type: string
+      linux_consume_windows_ppl_path:
+        description: Relative path where Linux packaging lane installs Windows-built PPL.
+        required: false
+        default: consumer/resource/plugins/lv_icon.windows.lvlibp
+        type: string
+      linux_consume_linux_ppl_path:
+        description: Relative path where Linux packaging lane installs Linux-built PPL.
+        required: false
+        default: consumer/resource/plugins/lv_icon.linux.lvlibp
+        type: string
+      vipm_project_path:
+        description: Relative path to .vipb consumed by vipm build.
+        required: false
+        default: consumer/Tooling/deployment/NI Icon editor.vipb
+        type: string
+      labview_version:
+        description: LabVIEW version (YYYY) encoded in handoff manifests.
+        required: false
+        default: '2026'
+        type: string
+      bitness:
+        description: Target bitness for bundle compatibility checks.
+        required: false
+        default: '64'
+        type: string
+      vipm_community_edition:
+        description: Run vipm activate before package build.
+        required: false
+        default: true
+        type: boolean
+    outputs:
+      windows_ppl_artifact_name:
+        description: Name of the uploaded Windows PPL bundle artifact.
+        value: ${{ jobs.build-ppl-windows.outputs.artifact_name }}
+      linux_ppl_artifact_name:
+        description: Name of the uploaded Linux PPL bundle artifact.
+        value: ${{ jobs.build-ppl-linux.outputs.artifact_name }}
+      vip_artifact_name:
+        description: Name of the uploaded VIP package artifact.
+        value: ${{ jobs.package-vip-linux.outputs.vip_artifact_name }}
+      vip_file_name:
+        description: File name of the discovered built VIP package.
+        value: ${{ jobs.package-vip-linux.outputs.vip_file_name }}
 
 permissions:
   contents: read
@@ -103,6 +188,12 @@ jobs:
           WINDOWS_LABVIEW_IMAGE: ${{ inputs.windows_labview_image }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $windowsPplOutputRelativePath = '${{ inputs.windows_ppl_output_path }}'
+          if ($windowsPplOutputRelativePath.StartsWith('consumer/')) {
+            $windowsPplOutputRelativePath = $windowsPplOutputRelativePath.Substring('consumer/'.Length)
+          }
+          $windowsPplOutputRelativePath = $windowsPplOutputRelativePath -replace '/', '\\'
+
           $customCommand = @'
           ${{ inputs.windows_build_command }}
           '@.Trim()
@@ -128,7 +219,7 @@ jobs:
               -e "CONTAINER_PARITY_BUILD_SPEC=true" `
               -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
               -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
-              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.windows.lvlibp" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$windowsPplOutputRelativePath" `
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:WINDOWS_LABVIEW_IMAGE" `
               powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
@@ -199,6 +290,12 @@ jobs:
           LINUX_LABVIEW_IMAGE: ${{ inputs.linux_labview_image }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $linuxPplOutputRelativePath = '${{ inputs.linux_ppl_output_path }}'
+          if ($linuxPplOutputRelativePath.StartsWith('consumer/')) {
+            $linuxPplOutputRelativePath = $linuxPplOutputRelativePath.Substring('consumer/'.Length)
+          }
+          $linuxPplOutputRelativePath = $linuxPplOutputRelativePath -replace '\\', '/'
+
           $customCommand = @'
           ${{ inputs.linux_build_command }}
           '@.Trim()
@@ -225,7 +322,7 @@ jobs:
               -e "CONTAINER_PARITY_BUILD_SPEC=true" `
               -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
               -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
-              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=resource/plugins/lv_icon.linux.lvlibp" `
+              -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplOutputRelativePath" `
               -e "CONTAINER_PARITY_LABVIEW_VERSION=${{ inputs.labview_version }}" `
               "$env:LINUX_LABVIEW_IMAGE" `
               bash -lc "chmod +x /workspace/Tooling/container-parity/runlabview-linux.sh /workspace/Tooling/container-parity/devmode-linux.sh; /workspace/Tooling/container-parity/runlabview-linux.sh"
@@ -277,6 +374,10 @@ jobs:
   package-vip-linux:
     needs: [build-ppl-windows, build-ppl-linux]
     runs-on: ubuntu-latest
+    outputs:
+      vip_artifact_name: ${{ steps.vip_meta.outputs.artifact_name }}
+      vip_file_name: ${{ steps.vip_meta.outputs.vip_file_name }}
+      vip_file_path: ${{ steps.vip_meta.outputs.vip_file_path }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -359,3 +460,29 @@ jobs:
 
               vipm build "$VIPM_PROJECT_PATH_IN_CONTAINER"
             '
+
+      - id: vip_meta
+        name: Locate built VIP package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $vipCandidates = Get-ChildItem -Path $consumerRoot -Recurse -File -Filter '*.vip' | Sort-Object LastWriteTimeUtc -Descending
+
+          if (-not $vipCandidates -or $vipCandidates.Count -eq 0) {
+            throw "No .vip artifact found under '$consumerRoot' after vipm build."
+          }
+
+          $vipFile = $vipCandidates[0]
+          $artifactName = "vip-package-$env:GITHUB_RUN_ID"
+
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_file_name=$($vipFile.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_file_path=$($vipFile.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload VI Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vip_meta.outputs.artifact_name }}
+          path: ${{ steps.vip_meta.outputs.vip_file_path }}
+          if-no-files-found: error
