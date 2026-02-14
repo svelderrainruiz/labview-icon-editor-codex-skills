@@ -156,9 +156,37 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match '-RequiredBitness ''64'''
         $runLunitBlock | Should -Not -Match '-RequiredBitness ''32'''
         $script:workflowContent | Should -Match 'Publish LabVIEW 2020 LUnit smoke summary'
+        $script:workflowContent | Should -Match 'LV2026 Comparative Control Probe \(diagnostic only\)'
+        $script:workflowContent | Should -Not -Match '\("- Bitness: `64`"\)'
         $script:workflowContent | Should -Match 'Upload LabVIEW 2020 LUnit smoke artifact'
         $script:workflowContent | Should -Match 'docker-contract-lunit-smoke-lv2020-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Upload LabVIEW 2020 LUnit smoke artifact\s*[\s\S]*?if:\s*always\(\)'
+    }
+
+    It 'keeps the LabVIEW 2020 smoke summary PowerShell block parse-safe' {
+        $summaryStepMatch = [regex]::Match(
+            $script:workflowContent,
+            '- name: Publish LabVIEW 2020 LUnit smoke summary[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name: Upload LabVIEW 2020 LUnit smoke artifact',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryStepMatch.Success | Should -BeTrue
+
+        $summaryScript = $summaryStepMatch.Groups['script'].Value
+        $summaryScript | Should -Not -Match '\("- Bitness: `64`"\)'
+
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'asserts source project remotes in each self-hosted job before consumer-script execution' {
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?Assert source project remotes'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?Assert source project remotes'
+        $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?Assert source project remotes'
+        $script:workflowContent | Should -Match 'scripts/Assert-SourceProjectRemotes\.ps1'
+        $script:workflowContent | Should -Match '-UpstreamRepo \$env:CONSUMER_REPO'
+        $script:workflowContent | Should -Match 'source-project-remotes\.result\.json'
     }
 
     It 'runs VIPB diagnostics suite on linux and emits summary plus artifact' {

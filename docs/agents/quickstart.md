@@ -71,6 +71,27 @@ Compatibility-only (deprecated) inputs:
 - If run is `completed` + `failure`: capture failed jobs, mark NO-GO, and rerun after fixes.
 - If run is `completed` + `success`: verify required artifacts and proceed with release publish.
 
+## 6.1) Self-hosted scheduling and remote triage
+- Verify required runner labels exist on at least one online runner:
+```powershell
+gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
+```
+- `run-lunit-smoke-lv2020x64` must run on label `self-hosted-windows-lv2020x64`.
+- Self-hosted jobs enforce source-project remote hygiene via `Assert-SourceProjectRemotes.ps1`:
+  - sets/updates `upstream` to `https://github.com/<source-project-repo>.git`
+  - validates non-interactive `git ls-remote upstream`
+  - fails hard when remote connectivity/auth is broken
+- LV2020 smoke command contract is run-only:
+  - `g-cli --lv-ver 2020 --arch 64 lunit -- -r <report> <project.lvproj>`
+  - no deterministic `g-cli ... lunit -- -h` preflight.
+- On LV2020 smoke failure, CI runs a diagnostic-only LV2026 x64 control probe and writes comparative results into `lunit-smoke.result.json` and the job summary.
+- LV2020 remains strict: a failed LV2020 outcome blocks downstream self-hosted jobs even if the LV2026 control probe passes.
+- Triage order for LV2020 smoke:
+  1. `lunit-smoke.result.json`
+  2. `reports/lunit-report-64.xml`
+  3. `reports/lunit-report-2026-control.xml` (if present)
+  4. `lunit-smoke.log`
+
 ## 7) Canonical references
 - `.github/workflows/ci.yml`
 - `.github/workflows/release-skill-layer.yml`

@@ -100,6 +100,35 @@ jobs:
           }
           Write-Host "Source project SHA verified: $actualSha"
 
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-lunit'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: `{0}`" -f [string]$result.status)
+            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
+            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
+            ("- Action: `{0}`" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Run native LabVIEW 2020 LUnit smoke (x64)
         shell: pwsh
         run: |
@@ -145,11 +174,31 @@ jobs:
           }
 
           $failedCount = ''
+          $validationOutcome = ''
+          $controlProbeStatus = ''
+          $controlProbeReason = ''
+          $controlProbeValidation = ''
+          $controlProbeRunExit = ''
+          $controlProbeReportPath = Join-Path $outputDirectory 'reports/lunit-report-2026-control.xml'
           if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
             try {
               $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
               if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.failed) {
                 $failedCount = [string]$resultPayload.report.failed
+              }
+              if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.validation_outcome) {
+                $validationOutcome = [string]$resultPayload.report.validation_outcome
+              }
+              if ($null -ne $resultPayload.control_probe) {
+                $controlProbeStatus = [string]$resultPayload.control_probe.status
+                $controlProbeReason = [string]$resultPayload.control_probe.reason
+                $controlProbeValidation = [string]$resultPayload.control_probe.validation_outcome
+                if ($null -ne $resultPayload.control_probe.run_exit_code) {
+                  $controlProbeRunExit = [string]$resultPayload.control_probe.run_exit_code
+                }
+                if ($null -ne $resultPayload.control_probe.report_path -and -not [string]::IsNullOrWhiteSpace([string]$resultPayload.control_probe.report_path)) {
+                  $controlProbeReportPath = [string]$resultPayload.control_probe.report_path
+                }
               }
             } catch {
               if ([string]::IsNullOrWhiteSpace($reason)) {
@@ -161,17 +210,38 @@ jobs:
           $summary = @(
             '## LabVIEW 2020 LUnit Smoke (x64)'
             ''
-            ("- Status: `{0}`" -f $status)
-            ("- Bitness: `64`")
-            ("- Report path: `{0}`" -f $reportPath)
-            ("- Artifact: `{0}`" -f $artifactName)
+            ("- Status: {0}" -f $status)
+            '- Bitness: 64'
+            ("- LV2020 report path: {0}" -f $reportPath)
+            ("- Artifact: {0}" -f $artifactName)
           )
 
+          if (-not [string]::IsNullOrWhiteSpace($validationOutcome)) {
+            $summary += ("- LV2020 validation outcome: {0}" -f $validationOutcome)
+          }
           if (-not [string]::IsNullOrWhiteSpace($failedCount)) {
-            $summary += ("- Failed test cases: `{0}`" -f $failedCount)
+            $summary += ("- Failed test cases: {0}" -f $failedCount)
           }
           if (-not [string]::IsNullOrWhiteSpace($reason)) {
-            $summary += ("- Reason: `{0}`" -f $reason.Replace("`r", ' ').Replace("`n", ' '))
+            $summary += ("- Reason: {0}" -f $reason.Replace("`r", ' ').Replace("`n", ' '))
+          }
+          if (-not [string]::IsNullOrWhiteSpace($controlProbeStatus) -and $controlProbeStatus -ne 'not_run') {
+            $summary += ''
+            $summary += '### LV2026 Comparative Control Probe (diagnostic only)'
+            $summary += ("- Status: {0}" -f $controlProbeStatus)
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeValidation)) {
+              $summary += ("- Validation outcome: {0}" -f $controlProbeValidation)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeRunExit)) {
+              $summary += ("- Run exit code: {0}" -f $controlProbeRunExit)
+            }
+            $summary += ("- Report path: {0}" -f $controlProbeReportPath)
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeReason) -and $controlProbeReason -ne 'control_probe_passed') {
+              $summary += ("- Reason: {0}" -f $controlProbeReason.Replace("`r", ' ').Replace("`n", ' '))
+            }
+            if ($controlProbeStatus -eq 'passed' -and $status -ne 'passed') {
+              $summary += '- Interpretation: LV2026 control probe passed; LV2020 failure is likely LV2020-specific compatibility/discovery.'
+            }
           }
 
           $summary -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -1078,6 +1148,35 @@ jobs:
           }
           Write-Host "Source project SHA verified: $actualSha"
 
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-build-vip'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: `{0}`" -f [string]$result.status)
+            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
+            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
+            ("- Action: `{0}`" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Validate self-hosted native LabVIEW prerequisites
         shell: pwsh
         run: |
@@ -1321,6 +1420,35 @@ jobs:
             throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
           Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-install-vip'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: `{0}`" -f [string]$result.status)
+            ("- Upstream repo: `{0}`" -f [string]$result.upstream_repo)
+            ("- Upstream URL: `{0}`" -f [string]$result.upstream_url_after)
+            ("- Action: `{0}`" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Download self-hosted VI Package artifact
         uses: actions/download-artifact@v4

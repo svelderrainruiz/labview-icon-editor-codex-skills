@@ -77,8 +77,15 @@ Installer contract:
 - Native self-hosted packaging contract:
   - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
   - required native LabVIEW 2020 smoke runner label: `[self-hosted, windows, self-hosted-windows-lv2020x64]`
-  - `run-lunit-smoke-lv2020x64` uses direct `g-cli lunit` contract commands and enforces required `64-bit` coverage only.
+  - `run-lunit-smoke-lv2020x64` uses the canonical direct run command only: `g-cli --lv-ver 2020 --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
+  - `run-lunit-smoke-lv2020x64` enforces required `64-bit` coverage only.
   - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
+  - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for LV2020 x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
+  - when LV2020 smoke fails, the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary; LV2020 failure still hard-fails the gate.
+  - all self-hosted jobs enforce source project remote hygiene via `scripts/Assert-SourceProjectRemotes.ps1`:
+    - configure `upstream` to `https://github.com/${{ env.CONSUMER_REPO }}.git`
+    - run non-interactive `git ls-remote upstream`
+    - fail deterministically if connectivity/auth contract is not met
   - `.vipb` flow in self-hosted lane is consume-only:
     - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
     - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
@@ -112,6 +119,7 @@ Installer contract:
     - `lunit-smoke.result.json`
     - `lunit-smoke.log`
     - `reports/lunit-report-64.xml`
+    - `reports/lunit-report-2026-control.xml` (only when LV2020 path fails and control probe executes)
     - `workspace/lvversion.before`
     - `workspace/lvversion.after`
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:

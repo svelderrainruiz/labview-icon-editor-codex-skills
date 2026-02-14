@@ -71,5 +71,21 @@ Describe 'Agent docs contract' {
         $content | Should -Match 'actions/runs/<RUN_ID>/jobs'
         $content | Should -Match 'actions/runs/<RUN_ID>/artifacts'
     }
+
+    It 'documents self-hosted runner label and source remote triage guidance' {
+        $quickstart = [string]$script:docs['quickstart.md']
+        $releaseGates = [string]$script:docs['release-gates.md']
+
+        $quickstart | Should -Match 'actions/runners'
+        $quickstart | Should -Match 'self-hosted-windows-lv2020x64'
+        $quickstart | Should -Match 'Assert-SourceProjectRemotes\.ps1'
+        $quickstart | Should -Match 'no deterministic `g-cli \.\.\. lunit -- -h` preflight'
+        $quickstart | Should -Match 'diagnostic-only LV2026 x64 control probe'
+        $quickstart | Should -Match 'LV2020 remains strict'
+        $releaseGates | Should -Match '## Self-hosted preflight policy'
+        $releaseGates | Should -Match 'Assert-SourceProjectRemotes\.ps1'
+        $releaseGates | Should -Match 'git ls-remote upstream'
+        $releaseGates | Should -Match 'diagnostic-only LV2026 x64 control probe'
+    }
 }
 

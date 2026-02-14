@@ -58,6 +58,18 @@ Optional inputs:
 - `run_self_hosted` (deprecated compatibility input)
 - `run_build_spec` (deprecated compatibility input)
 
+## Self-hosted preflight policy
+- Before declaring GO for runs that include self-hosted jobs, verify runner label availability:
+  - `self-hosted-windows-lv2020x64`
+  - `self-hosted-windows-lv2020x86`
+- Self-hosted jobs enforce source-project remote hygiene with `Assert-SourceProjectRemotes.ps1`:
+  - `upstream` must resolve to `https://github.com/<source-project-repo>.git`
+  - non-interactive `git ls-remote upstream` must succeed
+  - failures are hard-gate failures, not warnings.
+- `run-lunit-smoke-lv2020x64` remains a strict gate:
+  - LV2020 failure is blocking.
+  - a diagnostic-only LV2026 x64 control probe may run on failure to improve root-cause clarity, but it does not change gate outcome.
+
 ## Provenance policy
 Release notes must include CI and source-project provenance fields produced by `ci.yml` and `release-skill-layer`:
 - `skills_ci_repo`
