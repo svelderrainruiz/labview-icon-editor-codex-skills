@@ -35,17 +35,23 @@ Installer contract:
 
 ## Docker CI
 - Workflow: `.github/workflows/docker-contract-ci.yml`
-- Purpose: run repository contract tests inside Docker and build/publish a Linux PPL bundle artifact.
+- Purpose: run repository contract tests and then build/publish deterministic Windows and Linux PPL bundles in strict order.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
+- Pipeline order:
+  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
 - PPL source contract (docker-contract-ci lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
   - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
   - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
-  - output path: `consumer/resource/plugins/lv_icon.lvlibp`
-- Published artifact:
+  - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
+  - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
+- Published artifacts:
+  - `docker-contract-ppl-bundle-windows-<run_id>` containing:
+    - `lv_icon.windows.lvlibp`
+    - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
   - `docker-contract-ppl-bundle-linux-<run_id>` containing:
-    - `lv_icon.lvlibp`
+    - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`

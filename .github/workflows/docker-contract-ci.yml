@@ -17,17 +17,20 @@ on:
 permissions:
   contents: read
 
+env:
+  CONSUMER_REPO: svelderrainruiz/labview-icon-editor
+  CONSUMER_REF: patch/456-2020-migration-branch-from-9e46ecf
+  CONSUMER_EXPECTED_SHA: 9e46ecf591bc36afca8ddf4ce688a5f58604a12a
+  WINDOWS_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-windows
+  LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
+  WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
+  LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
+  LABVIEW_VERSION: '2026'
+  BITNESS: '64'
+
 jobs:
-  docker-contract-ci:
+  contract-tests:
     runs-on: ubuntu-latest
-    env:
-      CONSUMER_REPO: svelderrainruiz/labview-icon-editor
-      CONSUMER_REF: patch/456-2020-migration-branch-from-9e46ecf
-      CONSUMER_EXPECTED_SHA: 9e46ecf591bc36afca8ddf4ce688a5f58604a12a
-      LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
-      LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.lvlibp
-      LABVIEW_VERSION: '2026'
-      BITNESS: '64'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +54,119 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
+
+  build-ppl-windows:
+    runs-on: windows-latest
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - name: Validate Windows container parity assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/container-parity/runlabview-windows.ps1'
+          if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Missing required consumer script '$required'."
+          }
+
+      - name: Build Windows PPL in NI Windows container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsPplOutputRelativePath = $env:WINDOWS_PPL_OUTPUT_PATH
+          if ($windowsPplOutputRelativePath.StartsWith('consumer/')) {
+            $windowsPplOutputRelativePath = $windowsPplOutputRelativePath.Substring('consumer/'.Length)
+          }
+          $windowsPplOutputRelativePath = $windowsPplOutputRelativePath -replace '/', '\'
+
+          docker image inspect "$env:WINDOWS_LABVIEW_IMAGE" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            docker pull "$env:WINDOWS_LABVIEW_IMAGE"
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to pull/access Windows LabVIEW image '$env:WINDOWS_LABVIEW_IMAGE'. Ensure the image exists and runner authentication is configured."
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          docker run --rm `
+            -v "${consumerWorkspace}:C:\workspace" `
+            -e LVIE_REPO_ROOT=C:\workspace `
+            -e WORKSPACE_ROOT=C:\workspace `
+            -e REPO_ROOT=C:\workspace `
+            -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+            -e "LVIE_PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH=C:\workspace\lv_icon_editor.lvproj" `
+            -e "TARGET_DIR_REL=Test\Templates" `
+            -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+            -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+            -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+            -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$windowsPplOutputRelativePath" `
+            -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
+            "$env:WINDOWS_LABVIEW_IMAGE" `
+            powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Create Windows PPL bundle manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE $env:WINDOWS_PPL_OUTPUT_PATH
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Windows PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion $env:LABVIEW_VERSION `
+            -Bitness $env:BITNESS `
+            -WindowsImage $env:WINDOWS_LABVIEW_IMAGE `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+      - name: Upload Windows PPL bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-windows-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+          if-no-files-found: error
+
+  build-ppl-linux:
+    runs-on: ubuntu-latest
+    needs: [contract-tests, build-ppl-windows]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
 
       - name: Checkout consumer repository
         uses: actions/checkout@v4
@@ -83,6 +199,23 @@ jobs:
             echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
             ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
             exit 127
+          fi
+
+      - name: Ensure NI Linux image availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            if ! docker pull "$LINUX_LABVIEW_IMAGE"; then
+              dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
+              if [[ -f "$dockerfile_path" ]]; then
+                echo "Preflight: pull failed; attempting local build from '$dockerfile_path'" >&2
+                docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE"
+              else
+                echo "Unable to pull Linux image and local Dockerfile not found: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
+            fi
           fi
 
       - name: Build Linux PPL in NI Linux container
