@@ -78,12 +78,21 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?VERSION_PATCH:\s*''0'''
     }
 
-    It 'builds native x64 and x86 PPLs before VIP build in self-hosted lane' {
-        $script:workflowContent | Should -Match 'Build native 64-bit PPL'
-        $script:workflowContent | Should -Match 'Build native 32-bit PPL'
-        $script:workflowContent | Should -Match '-SupportedBitness 64'
-        $script:workflowContent | Should -Match '-SupportedBitness 32'
+    It 'bootstraps worktree context in self-hosted lane' {
+        $script:workflowContent | Should -Match 'Bootstrap worktree guard context'
+        $script:workflowContent | Should -Match 'LVIE_WORKTREE_ROOT='
+        $script:workflowContent | Should -Match 'LVIE_SKIP_WORKTREE_ROOT_CHECK=1'
+    }
+
+    It 'consumes windows x64 PPL bundle and only builds native x86 in self-hosted lane' {
+        $script:workflowContent | Should -Match 'Download Windows PPL bundle artifact'
+        $script:workflowContent | Should -Match 'actions/download-artifact@v4'
+        $script:workflowContent | Should -Match 'Consume Windows-built x64 PPL bundle'
+        $script:workflowContent | Should -Match 'Invoke-PplBundleConsume\.ps1'
         $script:workflowContent | Should -Match 'lv_icon_x64\.lvlibp'
+        $script:workflowContent | Should -Match 'Build native 32-bit PPL'
+        $script:workflowContent | Should -Not -Match 'Build native 64-bit PPL'
+        $script:workflowContent | Should -Match '-SupportedBitness 32'
         $script:workflowContent | Should -Match 'lv_icon_x86\.lvlibp'
     }
 

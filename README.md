@@ -48,7 +48,7 @@ Installer contract:
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - Native self-hosted packaging contract:
   - runner labels: `[self-hosted, windows, self-hosted-windows-lv]`
-  - native PPL outputs required by `.vipb`: `consumer/resource/plugins/lv_icon_x64.lvlibp` and `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - `.vipb` inputs in self-hosted lane: consumed x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` (from Windows bundle) plus native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
   - package version baseline for native lane: `0.1.0.<run_number>`
 - Published artifacts:
   - `docker-contract-ppl-bundle-windows-<run_id>` containing:

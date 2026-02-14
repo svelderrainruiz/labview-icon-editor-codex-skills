@@ -409,6 +409,18 @@ jobs:
           "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
 
+      - name: Bootstrap worktree guard context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $worktreeRoot = Join-Path $env:GITHUB_WORKSPACE 'worktrees'
+          if (-not (Test-Path -LiteralPath $worktreeRoot -PathType Container)) {
+            New-Item -Path $worktreeRoot -ItemType Directory -Force | Out-Null
+          }
+          "LVIE_WORKTREE_ROOT=$worktreeRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LVIE_SKIP_WORKTREE_ROOT_CHECK=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Exported LVIE_WORKTREE_ROOT=$worktreeRoot"
+
       - name: Ensure release notes file exists
         shell: pwsh
         run: |
@@ -418,23 +430,23 @@ jobs:
             New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
           }
 
-      - name: Build native 64-bit PPL
+      - name: Download Windows PPL bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-windows-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+
+      - name: Consume Windows-built x64 PPL bundle
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -SupportedBitness 64 `
-            -RepoRoot "$consumerRoot" `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT
-          & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
-            -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
-            -NewFilename "$consumerRoot/resource/plugins/lv_icon_x64.lvlibp"
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          $targetPplPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/resource/plugins/lv_icon_x64.lvlibp'
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
+            -BundleDirectory $bundleDir `
+            -OutputPplPath $targetPplPath `
+            -ExpectedLabVIEWVersion $env:LABVIEW_VERSION `
+            -ExpectedBitness '64'
 
       - name: Build native 32-bit PPL
         shell: pwsh
@@ -449,12 +461,13 @@ jobs:
             -Minor $env:VERSION_MINOR `
             -Patch $env:VERSION_PATCH `
             -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT
+            -Commit $env:VERSION_COMMIT `
+            -SkipWorktreeRootCheck
           & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
             -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
             -NewFilename "$consumerRoot/resource/plugins/lv_icon_x86.lvlibp"
 
-      - name: Validate native x64 or x86 PPL outputs
+      - name: Validate consumed x64 and native x86 PPL outputs
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -462,7 +475,7 @@ jobs:
           $x64Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x64.lvlibp'
           $x86Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x86.lvlibp'
           if (-not (Test-Path -LiteralPath $x64Path -PathType Leaf)) {
-            throw "Native x64 PPL output not found at '$x64Path'."
+            throw "Consumed x64 PPL output not found at '$x64Path'."
           }
           if (-not (Test-Path -LiteralPath $x86Path -PathType Leaf)) {
             throw "Native x86 PPL output not found at '$x86Path'."
