@@ -20,16 +20,19 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match '\.github/workflows/ci\.yml'
     }
 
-    It 'defines ordered contract-tests then windows then linux then self-hosted package jobs' {
+    It 'defines ordered contract-tests then windows or linux build jobs plus linux VIPB prep then self-hosted package jobs' {
         $script:workflowContent | Should -Match 'contract-tests:'
         $script:workflowContent | Should -Match 'build-ppl-windows:'
         $script:workflowContent | Should -Match 'build-ppl-linux:'
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
         $script:workflowContent | Should -Match 'build-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-ppl-windows\]'
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
-        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-ppl-windows,\s*build-ppl-linux\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-ppl-windows,\s*build-ppl-linux,\s*prepare-vipb-linux\]'
     }
 
     It 'defines pinned consumer source and shared windows or linux build constants' {
@@ -42,9 +45,9 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'LINUX_PPL_OUTPUT_PATH:\s*consumer/resource/plugins/lv_icon\.linux\.lvlibp'
     }
 
-    It 'checks out consumer and validates expected SHA in both PPL build jobs' {
-        ([regex]::Matches($script:workflowContent, 'Checkout consumer repository')).Count | Should -BeGreaterOrEqual 2
-        ([regex]::Matches($script:workflowContent, 'Verify checked out consumer SHA')).Count | Should -BeGreaterOrEqual 2
+    It 'checks out consumer and validates expected SHA in PPL and VIPB prep jobs' {
+        ([regex]::Matches($script:workflowContent, 'Checkout consumer repository')).Count | Should -BeGreaterOrEqual 3
+        ([regex]::Matches($script:workflowContent, 'Verify checked out consumer SHA')).Count | Should -BeGreaterOrEqual 3
         $script:workflowContent | Should -Match 'Consumer SHA mismatch'
     }
 
@@ -72,6 +75,17 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'Upload Linux PPL bundle artifact'
     }
 
+    It 'prepares VIPB metadata on linux and emits summary plus artifact' {
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:'
+        $script:workflowContent | Should -Match 'Prepare VIPB metadata deterministically'
+        $script:workflowContent | Should -Match 'scripts/Update-VipbDisplayInfo\.ps1'
+        $script:workflowContent | Should -Match 'Publish VIPB change summary'
+        $script:workflowContent | Should -Match 'GITHUB_STEP_SUMMARY'
+        $script:workflowContent | Should -Match 'Artifact:\s*`docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}`'
+        $script:workflowContent | Should -Match 'Upload prepared VIPB artifact'
+        $script:workflowContent | Should -Match 'docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}'
+    }
+
     It 'creates manifests for both windows and linux bundles' {
         ([regex]::Matches($script:workflowContent, 'scripts/New-PplBundleManifest\.ps1')).Count | Should -BeGreaterOrEqual 2
     }
@@ -90,22 +104,25 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'LVIE_SKIP_WORKTREE_ROOT_CHECK=1'
     }
 
-    It 'consumes windows x64 PPL bundle and only builds native x86 in self-hosted lane' {
+    It 'consumes windows x64 PPL and linux-prepared VIPB, then only builds native x86 in self-hosted lane' {
         $script:workflowContent | Should -Match 'Download Windows PPL bundle artifact'
+        $script:workflowContent | Should -Match 'Download prepared VIPB artifact'
         $script:workflowContent | Should -Match 'actions/download-artifact@v4'
+        $script:workflowContent | Should -Match 'Consume prepared VIPB from Linux artifact'
+        $script:workflowContent | Should -Match 'docker-contract-vipb-prepared-linux-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Consume Windows-built x64 PPL bundle'
         $script:workflowContent | Should -Match 'Invoke-PplBundleConsume\.ps1'
         $script:workflowContent | Should -Match 'lv_icon_x64\.lvlibp'
         $script:workflowContent | Should -Match 'Build native 32-bit PPL'
         $script:workflowContent | Should -Not -Match 'Build native 64-bit PPL'
+        $script:workflowContent | Should -Not -Match 'Modify VIPB display info \(LV 64-bit\)'
         $script:workflowContent | Should -Match '-SupportedBitness 32'
         $script:workflowContent | Should -Match 'lv_icon_x86\.lvlibp'
     }
 
     It 'stamps 0.1.0 version in native build calls and uploads self-hosted VIP artifact' {
         $script:workflowContent | Should -Match 'BuildProjectSpec\.ps1'
-        $script:workflowContent | Should -Match 'ModifyVIPBDisplayInfo\.ps1'
-        $script:workflowContent | Should -Match 'Upload modified VIPB \(post-mortem\)'
+        $script:workflowContent | Should -Match 'Upload consumed VIPB \(post-mortem\)'
         $script:workflowContent | Should -Match 'docker-contract-vipb-modified-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Invoke-VipBuild\.ps1'
         $script:workflowContent | Should -Match '-Major \$env:VERSION_MAJOR'

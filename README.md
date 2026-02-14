@@ -35,11 +35,13 @@ Installer contract:
 
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
-- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, then build a native self-hosted Windows VI package.
+- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, prepare deterministic VIPB metadata on Linux, then build a native self-hosted Windows VI package.
 - Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
 - Pipeline order:
-  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux` -> `build-vip-self-hosted`
+  - `contract-tests` -> `build-ppl-windows` -> `build-ppl-linux`
+  - `contract-tests` -> `prepare-vipb-linux`
+  - `build-vip-self-hosted` needs `build-ppl-windows`, `build-ppl-linux`, and `prepare-vipb-linux`
 - PPL source contract (CI Pipeline lane):
   - consumer repo: `svelderrainruiz/labview-icon-editor`
   - consumer ref: `patch/456-2020-migration-branch-from-9e46ecf`
@@ -48,7 +50,10 @@ Installer contract:
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - Native self-hosted packaging contract:
   - runner labels: `[self-hosted, windows, self-hosted-windows-lv]`
-  - `.vipb` inputs in self-hosted lane: consumed x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` (from Windows bundle) plus native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - `.vipb` flow in self-hosted lane is consume-only:
+    - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
+    - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
+    - build native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
   - package version baseline for native lane: `0.1.0.<run_number>`
   - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
 - Published artifacts:
@@ -62,8 +67,12 @@ Installer contract:
   - `docker-contract-ppl-bundle-linux-<run_id>` containing:
     - `lv_icon.linux.lvlibp`
     - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-vipb-prepared-linux-<run_id>` containing:
+    - prepared `NI Icon editor.vipb`
+    - `vipb-diff.json` (field-level before/after delta)
+    - `vipb-diff-summary.md` (summary table written to workflow run summary)
   - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
-    - modified `consumer/Tooling/deployment/NI Icon editor.vipb` emitted immediately after `Modify VIPB display info (LV 64-bit)` for post-mortem analysis
+    - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
 - Local run (PowerShell image):

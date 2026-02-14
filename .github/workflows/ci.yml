@@ -356,9 +356,162 @@ jobs:
           path: ${{ runner.temp }}/ppl-bundle-linux
           if-no-files-found: error
 
+  prepare-vipb-linux:
+    runs-on: ubuntu-latest
+    needs: [contract-tests]
+    env:
+      VERSION_MAJOR: '0'
+      VERSION_MINOR: '1'
+      VERSION_PATCH: '0'
+      VERSION_BUILD: '${{ github.run_number }}'
+      VERSION_COMMIT: '${{ github.sha }}'
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout consumer repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out consumer SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Consumer SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Consumer SHA verified: $actualSha"
+
+      - id: labview-version
+        name: Resolve LabVIEW version from consumer repo
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $versionHelper = Join-Path $consumerRoot 'Tooling/support/LabVIEWVersion.ps1'
+          . $versionHelper
+          $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
+          "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host ("Resolved LabVIEW version from consumer .lvversion: {0}" -f $lvInfo.Raw)
+
+      - name: Ensure release notes file exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          }
+
+      - id: display-info
+        name: Generate VIP display information JSON
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
+          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
+            Get-Content -Raw -Path $releaseNotesPath
+          } else {
+            ''
+          }
+
+          $info = @{
+            "Package Version" = @{
+              "major" = [int]$env:VERSION_MAJOR
+              "minor" = [int]$env:VERSION_MINOR
+              "patch" = [int]$env:VERSION_PATCH
+              "build" = [int]$env:VERSION_BUILD
+            }
+            "Product Name" = "labview-icon-editor"
+            "Company Name" = "${{ github.repository_owner }}"
+            "Author Name (Person or Company)" = "${{ github.repository }}"
+            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
+            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
+            "Product Description Summary" = "labview-icon-editor VI Package build."
+            "Product Description" = "labview-icon-editor VI Package build."
+            "Release Notes - Change Log" = $releaseNotes
+          }
+
+          $json = $info | ConvertTo-Json -Depth 6 -Compress
+          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Prepare VIPB metadata deterministically
+        shell: pwsh
+        env:
+          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          $vipbPath = Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH
+          if (-not (Test-Path -LiteralPath $vipbPath -PathType Leaf)) {
+            throw "VIPB path not found at '$vipbPath'."
+          }
+
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          $diffPath = Join-Path $bundleDir 'vipb-diff.json'
+          $summaryPath = Join-Path $bundleDir 'vipb-diff-summary.md'
+
+          & "$env:GITHUB_WORKSPACE/scripts/Update-VipbDisplayInfo.ps1" `
+            -VipbPath $vipbPath `
+            -ReleaseNotesFile $releaseNotesPath `
+            -DisplayInformationJson $env:DISPLAY_INFORMATION_JSON `
+            -LabVIEWVersionYear '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
+            -SupportedBitness '64' `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -DiffOutputPath $diffPath `
+            -SummaryMarkdownPath $summaryPath
+
+          Copy-Item -LiteralPath $vipbPath -Destination (Join-Path $bundleDir 'NI Icon editor.vipb') -Force
+
+      - name: Publish VIPB change summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/vipb-diff-summary.md'
+          if (Test-Path -LiteralPath $summaryPath -PathType Leaf) {
+            Get-Content -LiteralPath $summaryPath -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            @(
+              ''
+              '- Artifact: `docker-contract-vipb-prepared-linux-${{ github.run_id }}`'
+              '- Source: `runner.temp/vipb-prepared-linux`'
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            @(
+              '## VIPB Metadata Delta'
+              ''
+              '- Status: failed (summary not generated)'
+              '- Expected summary path: `' + $summaryPath + '`'
+              '- Expected artifact: `docker-contract-vipb-prepared-linux-${{ github.run_id }}`'
+              '- Source: `runner.temp/vipb-prepared-linux`'
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload prepared VIPB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipb-prepared-linux-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipb-prepared-linux
+          if-no-files-found: error
+
   build-vip-self-hosted:
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
-    needs: [build-ppl-windows, build-ppl-linux]
+    needs: [build-ppl-windows, build-ppl-linux, prepare-vipb-linux]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -398,7 +551,6 @@ jobs:
             'Tooling/Invoke-VipBuild.ps1',
             '.github/actions/build-lvlibp/BuildProjectSpec.ps1',
             '.github/actions/rename-file/Rename-file.ps1',
-            '.github/actions/modify-vipb-display-info/ModifyVIPBDisplayInfo.ps1',
             'Tooling/support/LabVIEWVersion.ps1',
             'Tooling/deployment/NI Icon editor.vipb'
           )
@@ -451,6 +603,29 @@ jobs:
         with:
           name: docker-contract-ppl-bundle-windows-${{ github.run_id }}
           path: ${{ runner.temp }}/ppl-bundle-windows
+
+      - name: Download prepared VIPB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-vipb-prepared-linux-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipb-prepared-linux
+
+      - name: Consume prepared VIPB from Linux artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceVipbPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/NI Icon editor.vipb'
+          if (-not (Test-Path -LiteralPath $sourceVipbPath -PathType Leaf)) {
+            throw "Prepared VIPB artifact is missing '$sourceVipbPath'."
+          }
+
+          $targetVipbPath = Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH
+          $targetVipbDirectory = Split-Path -Path $targetVipbPath -Parent
+          if (-not (Test-Path -LiteralPath $targetVipbDirectory -PathType Container)) {
+            New-Item -Path $targetVipbDirectory -ItemType Directory -Force | Out-Null
+          }
+          Copy-Item -LiteralPath $sourceVipbPath -Destination $targetVipbPath -Force
+          Write-Host "Using prepared VIPB from Linux artifact: $targetVipbPath"
 
       - name: Consume Windows-built x64 PPL bundle
         shell: pwsh
@@ -530,28 +705,7 @@ jobs:
           $json = $info | ConvertTo-Json -Depth 6 -Compress
           "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Modify VIPB display info (LV 64-bit)
-        shell: pwsh
-        env:
-          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/.github/actions/modify-vipb-display-info/ModifyVIPBDisplayInfo.ps1" `
-            -SupportedBitness 64 `
-            -RepoRoot "$consumerRoot" `
-            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT `
-            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
-            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON
-
-      - name: Upload modified VIPB (post-mortem)
+      - name: Upload consumed VIPB (post-mortem)
         if: always()
         uses: actions/upload-artifact@v4
         with:
