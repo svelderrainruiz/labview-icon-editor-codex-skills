@@ -145,7 +145,14 @@ jobs:
               docker pull "$env:LINUX_LABVIEW_IMAGE"
             }
             if ($LASTEXITCODE -ne 0) {
-              throw "Unable to pull/access Linux LabVIEW image '$env:LINUX_LABVIEW_IMAGE'. Ensure the image exists and runner authentication is configured."
+              $dockerfilePath = Join-Path $env:GITHUB_WORKSPACE 'docker/ni-lv-pwsh.Dockerfile'
+              if (Test-Path -LiteralPath $dockerfilePath -PathType Leaf) {
+                Write-Host "Preflight: pull failed; attempting local build from '$dockerfilePath'"
+                docker build -t "$env:LINUX_LABVIEW_IMAGE" -f "$dockerfilePath" "$env:GITHUB_WORKSPACE"
+              }
+            }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to pull/build Linux LabVIEW image '$env:LINUX_LABVIEW_IMAGE'. Ensure the image exists, base image access is configured, or runner authentication is available."
             }
 
             $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
@@ -261,9 +268,18 @@ jobs:
 
           if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
             if ! docker pull "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
-              echo "Unable to pull/access Linux image: $LINUX_LABVIEW_IMAGE" >&2
-              echo "Ensure the image exists and the runner has registry auth, or override linux_labview_image with a reachable image for triage." >&2
-              exit 1
+              dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
+              if [[ -f "$dockerfile_path" ]]; then
+                echo "Preflight: pull failed; attempting local build from $dockerfile_path" >&2
+                if ! docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE" >/dev/null 2>&1; then
+                  echo "Unable to pull/build Linux image: $LINUX_LABVIEW_IMAGE" >&2
+                  echo "Ensure the image exists, base image access is configured, or runner auth is available." >&2
+                  exit 1
+                fi
+              else
+                echo "Unable to pull Linux image and local Dockerfile not found: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
             fi
           fi
 
