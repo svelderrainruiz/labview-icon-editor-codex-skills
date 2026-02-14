@@ -15,6 +15,9 @@ param(
   [string[]]$WorkflowInput,
 
   [Parameter(Mandatory = $false)]
+  [switch]$TriagePackageVipLinux,
+
+  [Parameter(Mandatory = $false)]
   [int]$PollSeconds = 20,
 
   [Parameter(Mandatory = $false)]
@@ -70,6 +73,57 @@ function Write-CycleLog {
   Add-Content -Path $LogPath -Value $line -Encoding utf8
 }
 
+function Get-NormalizedWorkflowInputs {
+  param(
+    [Parameter()]
+    [AllowNull()]
+    [object[]]$RawInputs
+  )
+
+  $result = @()
+
+  foreach ($raw in @($RawInputs)) {
+    if ($null -eq $raw) {
+      continue
+    }
+
+    if ($raw -is [System.Array]) {
+      foreach ($item in $raw) {
+        if ($null -eq $item) {
+          continue
+        }
+
+        $text = [string]$item
+        if ([string]::IsNullOrWhiteSpace($text)) {
+          continue
+        }
+
+        $candidate = $text.Trim().Trim('"').Trim("'")
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+          $result += $candidate
+        }
+      }
+
+      continue
+    }
+
+    $rawText = [string]$raw
+    if ([string]::IsNullOrWhiteSpace($rawText)) {
+      continue
+    }
+
+    $parts = @($rawText -split ',')
+    foreach ($part in $parts) {
+      $candidate = $part.Trim().Trim('"').Trim("'")
+      if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        $result += $candidate
+      }
+    }
+  }
+
+  return @($result | Where-Object { $_ -like '*=*' })
+}
+
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -Path $repoRoot
 
@@ -91,6 +145,24 @@ $authProbe = Invoke-External -FilePath 'gh' -Arguments @('auth', 'status')
 if ($authProbe.ExitCode -ne 0) {
   throw "GitHub CLI is not authenticated. Run 'gh auth login'."
 }
+
+$normalizedWorkflowInputs = Get-NormalizedWorkflowInputs -RawInputs $WorkflowInput
+if ($TriagePackageVipLinux.IsPresent) {
+  $triageInputs = @(
+    'ppl_build_lane=linux-container',
+    'linux_labview_image=mcr.microsoft.com/powershell:7.4-ubuntu-22.04',
+    "windows_build_command=New-Item -ItemType Directory -Path 'consumer/resource/plugins' -Force | Out-Null; Set-Content -Path 'consumer/resource/plugins/lv_icon.lvlibp' -Value 'stub-ppl' -Encoding ascii"
+  )
+
+  $normalizedWorkflowInputs += $triageInputs
+}
+
+$normalizedWorkflowInputs = @(
+  $normalizedWorkflowInputs |
+    Group-Object -AsHashTable -AsString |
+    ForEach-Object { $_.Keys } |
+    Sort-Object
+)
 
 $cycle = 0
 while ($true) {
@@ -142,7 +214,7 @@ while ($true) {
   }
 
   $dispatchArgs = @('workflow', 'run', $WorkflowFile, '--ref', $Branch)
-  foreach ($pair in @($WorkflowInput)) {
+  foreach ($pair in $normalizedWorkflowInputs) {
     if ([string]::IsNullOrWhiteSpace($pair) -or -not $pair.Contains('=')) {
       throw "Invalid -WorkflowInput '$pair'. Expected format key=value."
     }
