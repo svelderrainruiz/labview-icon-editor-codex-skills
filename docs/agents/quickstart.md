@@ -1,6 +1,6 @@
 # Agent Quickstart (labview-icon-editor)
 
-Last validated: 2026-02-14
+Last validated: 2026-02-15
 Validation evidence: skills repo CI-coupled release gate
 
 ## Purpose
@@ -63,6 +63,17 @@ Compatibility-only (deprecated) inputs:
 - `run_self_hosted`
 - `run_build_spec`
 
+## 4.1) Deterministic post-merge auto-release
+- `release-skill-layer` runs automatically on `push` to `main`.
+- Auto-release resolver derives:
+  - `release_tag` as `v<manifest.version>`.
+  - `consumer_repo`, `consumer_ref`, `consumer_sha`, and `labview_profile` from `.github/workflows/ci.yml` defaults.
+- If the resolved tag already exists, workflow follows deterministic skip path:
+  - `should_release=false`
+  - `skip_reason=tag_exists`
+  - `release-skipped` job succeeds and publishes skip summary.
+- `workflow_dispatch` remains available for explicit overrides and reruns with operator-provided inputs.
+
 ## 5) Provenance fields expected in release notes
 - `skills_ci_repo`
 - `skills_ci_run_url`
@@ -112,6 +123,18 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
   2. `reports/lunit-report-lv<effective_year>-x64.xml`
   3. `reports/lunit-report-lv2026-x64-control.xml` (if present)
   4. `lunit-smoke.log`
+
+## 6.2) Runner PowerShell policy baseline
+- Required baseline for Windows/self-hosted runners:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+```
+- Verify policy matrix:
+```powershell
+Get-ExecutionPolicy -List
+```
+- CI enforces this with `scripts/Initialize-RunnerPowerShellPolicy.ps1` and `scripts/Unblock-WorkspaceScripts.ps1`.
+- Do not use `-ExecutionPolicy Bypass` in repo-owned commands, workflow snippets, or local runbooks.
 
 ## 7) Canonical references
 - `.github/workflows/ci.yml`

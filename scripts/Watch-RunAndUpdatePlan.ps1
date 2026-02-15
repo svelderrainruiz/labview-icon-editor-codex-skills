@@ -6,7 +6,7 @@ param(
   [string]$PlanPath,
 
   [Parameter(Mandatory = $false)]
-  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor',
+  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor-codex-skills',
 
   [Parameter(Mandatory = $false)]
   [string]$StatePath,
@@ -26,11 +26,9 @@ $jobsUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId/jobs?per
 $artUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId/artifacts?per_page=100"
 
 $requiredArtifacts = @(
-  'lv_icon_x64.lvlibp',
-  'lv_icon_x86.lvlibp',
-  'conformance-full',
-  'core-conformance-linux-evidence',
-  'core-conformance-windows-evidence'
+  'docker-contract-ppl-bundle-windows-x64-',
+  'docker-contract-ppl-bundle-linux-x64-',
+  'docker-contract-vip-package-self-hosted-'
 )
 
 if (-not [string]::IsNullOrWhiteSpace($StatePath)) {
@@ -63,7 +61,20 @@ while ($true) {
   }
 
   $artifactNames = @($art.artifacts | ForEach-Object { $_.name })
-  $missingArtifacts = @($requiredArtifacts | Where-Object { $_ -notin $artifactNames })
+  $missingArtifacts = @()
+  foreach ($requiredArtifactPrefix in $requiredArtifacts) {
+    $matchFound = $false
+    foreach ($artifactName in $artifactNames) {
+      if ($artifactName.StartsWith($requiredArtifactPrefix, [System.StringComparison]::Ordinal)) {
+        $matchFound = $true
+        break
+      }
+    }
+
+    if (-not $matchFound) {
+      $missingArtifacts += $requiredArtifactPrefix
+    }
+  }
   $badJobs = @($jobs.jobs | Where-Object {
       $_.conclusion -in @('failure', 'cancelled', 'timed_out', 'startup_failure', 'action_required')
     })
@@ -111,11 +122,9 @@ while ($true) {
   }
 
   if ($missingArtifacts.Count -gt 0) {
-    $content = $content -replace '- \[x\] Required packed library artifacts exist: lv_icon_x64\.lvlibp and lv_icon_x86\.lvlibp', '- [ ] Required packed library artifacts exist: lv_icon_x64.lvlibp and lv_icon_x86.lvlibp'
-    $content = $content -replace '- \[x\] Conformance evidence artifacts exist \(full \+ linux \+ windows\)', '- [ ] Conformance evidence artifacts exist (full + linux + windows)'
+    $content = $content -replace '- \[x\] Required release artifacts exist: windows x64 bundle, linux x64 bundle, and self-hosted VIP package', '- [ ] Required release artifacts exist: windows x64 bundle, linux x64 bundle, and self-hosted VIP package'
   } else {
-    $content = $content -replace '- \[ \] Required packed library artifacts exist: lv_icon_x64\.lvlibp and lv_icon_x86\.lvlibp', '- [x] Required packed library artifacts exist: lv_icon_x64.lvlibp and lv_icon_x86.lvlibp'
-    $content = $content -replace '- \[ \] Conformance evidence artifacts exist \(full \+ linux \+ windows\)', '- [x] Conformance evidence artifacts exist (full + linux + windows)'
+    $content = $content -replace '- \[ \] Required release artifacts exist: windows x64 bundle, linux x64 bundle, and self-hosted VIP package', '- [x] Required release artifacts exist: windows x64 bundle, linux x64 bundle, and self-hosted VIP package'
   }
 
   Set-Content -Path $PlanPath -Value $content -Encoding utf8

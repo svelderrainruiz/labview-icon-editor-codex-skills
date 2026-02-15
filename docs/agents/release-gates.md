@@ -1,6 +1,6 @@
 # Release Gates Contract (Agent View)
 
-Last validated: 2026-02-14
+Last validated: 2026-02-15
 Validation evidence: skills repo CI-coupled release flow
 
 ## Contract intent
@@ -48,8 +48,14 @@ Any job with one of these conclusions fails the gate:
 4. Verify all required artifacts are present.
 5. If all pass: GO; else: NO-GO.
 
+Advisory lane during rollout:
+- `validate-pylavi-docker-source-project` is intentionally non-gating.
+- Its artifact `docker-contract-pylavi-source-project-<run_id>` is for diagnostics and triage only, not GO/NO-GO.
+
 ## Dispatch policy
-Only dispatch `.github/workflows/release-skill-layer.yml` when GO.
+- Auto path: `.github/workflows/release-skill-layer.yml` runs on `push` to `main`.
+- Manual path: `workflow_dispatch` remains available for explicit overrides and reruns.
+- Resolve/publish only when GO.
 
 Required dispatch inputs:
 - `release_tag` (example `v0.4.1`)
@@ -63,6 +69,17 @@ Optional inputs:
 - `run_lv2020_edge_smoke` (optional non-gating LV2020 edge smoke diagnostics)
 - `run_self_hosted` (deprecated compatibility input)
 - `run_build_spec` (deprecated compatibility input)
+
+## Auto-release policy
+- Auto-release is version-gated:
+  - derive tag from `manifest.json` as `v<manifest.version>`.
+  - if tag already exists, skip deterministically with `skip_reason=tag_exists`.
+- Resolver source of truth defaults from `ci.yml`:
+  - `source_project_repo`
+  - `source_project_ref`
+  - `source_project_sha`
+  - `labview_profile`
+- Manual dispatch may override these defaults when needed.
 
 ## Self-hosted preflight policy
 - Before declaring GO for runs that include self-hosted jobs, verify runner label availability:
@@ -90,6 +107,11 @@ Optional inputs:
   - enabled via `run_lv2020_edge_smoke: true`
   - runs in `run-lunit-smoke-lv2020x64-edge`
   - intended for deferred edge-case diagnostics and does not block required gates.
+- Runner PowerShell policy baseline:
+  - one-time setup per runner account: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force`
+  - verify with `Get-ExecutionPolicy -List`
+  - CI auto-corrects and emits diagnostics with `Initialize-RunnerPowerShellPolicy.ps1`; unresolved non-compliance is hard-fail.
+  - `-ExecutionPolicy Bypass` is not allowed in governed CI/docs/script command paths.
 
 ## Provenance policy
 Release notes must include CI and source-project provenance fields produced by `ci.yml` and `release-skill-layer`:

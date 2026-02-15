@@ -6,6 +6,7 @@ on:
       - 'schemas/**'
       - 'scripts/Invoke-ReleaseOrchestrator.ps1'
       - 'scripts/Watch-RunAndUpdatePlan.ps1'
+      - 'scripts/Invoke-ReleaseMetricsSnapshot.ps1'
       - 'tests/ReleaseStateContract.Tests.ps1'
       - '.github/workflows/release-state-contract.yml'
   workflow_dispatch:

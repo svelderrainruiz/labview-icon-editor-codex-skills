@@ -19,11 +19,22 @@ Describe 'Release workflow contract' {
         $script:ciContent = Get-Content -Path $script:ciWorkflowPath -Raw
     }
 
-    It 'keeps release workflow dispatch-only and CI-gated via reusable ci.yml' {
-        $script:releaseContent | Should -Match 'on:\s*workflow_dispatch:'
+    It 'supports push-to-main auto release and workflow_dispatch overrides via resolver plus reusable CI gate' {
+        $script:releaseContent | Should -Match 'on:\s*[\s\S]*?push:\s*[\s\S]*?branches:\s*[\s\S]*?- main'
+        $script:releaseContent | Should -Match 'on:\s*[\s\S]*?workflow_dispatch:'
+        $script:releaseContent | Should -Match 'resolve-release-context:'
+        $script:releaseContent | Should -Match 'should_release:\s*\$\{\{\s*steps\.resolve\.outputs\.should_release\s*\}\}'
+        $script:releaseContent | Should -Match 'skip_reason:\s*\$\{\{\s*steps\.resolve\.outputs\.skip_reason\s*\}\}'
         $script:releaseContent | Should -Match 'ci-gate:'
+        $script:releaseContent | Should -Match 'ci-gate:\s*[\s\S]*?needs:\s*\[resolve-release-context\]'
+        $script:releaseContent | Should -Match "ci-gate:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release == 'true'\s*\}\}"
         $script:releaseContent | Should -Match 'uses:\s+\./\.github/workflows/ci\.yml'
-        $script:releaseContent | Should -Match 'package:\s*\r?\n\s*needs:\s*\[ci-gate\]'
+        $script:releaseContent | Should -Match 'package:\s*[\s\S]*?needs:\s*\[resolve-release-context,\s*ci-gate\]'
+        $script:releaseContent | Should -Match "package:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release == 'true'\s*\}\}"
+        $script:releaseContent | Should -Match 'publish-release-assets:\s*[\s\S]*?needs:\s*\[resolve-release-context,\s*ci-gate,\s*package\]'
+        $script:releaseContent | Should -Match "publish-release-assets:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release == 'true'\s*\}\}"
+        $script:releaseContent | Should -Match 'release-skipped:'
+        $script:releaseContent | Should -Match "release-skipped:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release != 'true'\s*\}\}"
         $script:releaseContent | Should -Not -Match 'parity-gate:'
     }
 
@@ -40,13 +51,19 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:'
     }
 
-    It 'passes source project pin inputs into reusable CI gate' {
-        $script:releaseContent | Should -Match 'source_project_repo:\s*\$\{\{ inputs\.consumer_repo \}\}'
-        $script:releaseContent | Should -Match 'source_project_ref:\s*\$\{\{ inputs\.consumer_ref \}\}'
-        $script:releaseContent | Should -Match 'source_project_sha:\s*\$\{\{ inputs\.consumer_sha \}\}'
-        $script:releaseContent | Should -Match 'labview_profile:\s*\$\{\{ inputs\.labview_profile \}\}'
-        $script:releaseContent | Should -Match 'source_labview_version_override:\s*\$\{\{ inputs\.source_labview_version_override \}\}'
-        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:\s*\$\{\{ inputs\.run_lv2020_edge_smoke \}\}'
+    It 'passes source project pin values into reusable CI gate via resolver outputs' {
+        $script:releaseContent | Should -Match 'source_project_repo:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.consumer_repo\s*\}\}'
+        $script:releaseContent | Should -Match 'source_project_ref:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.consumer_ref\s*\}\}'
+        $script:releaseContent | Should -Match 'source_project_sha:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.consumer_sha\s*\}\}'
+        $script:releaseContent | Should -Match 'labview_profile:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.labview_profile\s*\}\}'
+        $script:releaseContent | Should -Match 'source_labview_version_override:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.source_labview_version_override\s*\}\}'
+        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.run_lv2020_edge_smoke\s*\}\}'
+    }
+
+    It 'implements version-gated auto-release skip when tag already exists on push' {
+        $script:releaseContent | Should -Match 'if\s*\(\$isPushMain -and \$tagExists\)\s*\{\s*\$shouldRelease = ''false''\s*\r?\n\s*\$skipReason = ''tag_exists'''
+        $script:releaseContent | Should -Match 'repos/\$env:GITHUB_REPOSITORY/git/ref/tags/'
+        $script:releaseContent | Should -Match "release-skipped:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release != 'true'\s*\}\}"
     }
 
     It 'packages vipm-cli-machine and linux-ppl-container-build modules in installer staging' {
@@ -56,7 +73,7 @@ Describe 'Release workflow contract' {
 
     It 'publishes release assets from CI artifacts plus installer' {
         $script:releaseContent | Should -Match 'publish-release-assets:'
-        $script:releaseContent | Should -Match 'needs:\s*\[ci-gate,\s*package\]'
+        $script:releaseContent | Should -Match 'needs:\s*\[resolve-release-context,\s*ci-gate,\s*package\]'
         $script:releaseContent | Should -Match 'Download installer artifact'
         $script:releaseContent | Should -Match 'pattern:\s*docker-contract-ppl-bundle-windows-x64-\*'
         $script:releaseContent | Should -Match 'pattern:\s*docker-contract-ppl-bundle-linux-x64-\*'

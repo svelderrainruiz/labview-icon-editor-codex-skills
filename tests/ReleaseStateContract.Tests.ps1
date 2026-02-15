@@ -10,8 +10,9 @@ Describe 'Release state Phase 2 contract' {
         $script:dispatchResultSchemaPath = Join-Path $script:repoRoot 'schemas/dispatch-result.schema.json'
         $script:watcherPath = Join-Path $script:repoRoot 'scripts/Watch-RunAndUpdatePlan.ps1'
         $script:orchestratorPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseOrchestrator.ps1'
+        $script:metricsPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseMetricsSnapshot.ps1'
 
-        foreach ($path in @($script:releaseStateSchemaPath, $script:dispatchResultSchemaPath, $script:watcherPath, $script:orchestratorPath)) {
+        foreach ($path in @($script:releaseStateSchemaPath, $script:dispatchResultSchemaPath, $script:watcherPath, $script:orchestratorPath, $script:metricsPath)) {
             if (-not (Test-Path -Path $path -PathType Leaf)) {
                 throw "Required phase-2 artifact missing: $path"
             }
@@ -21,6 +22,7 @@ Describe 'Release state Phase 2 contract' {
         $script:dispatchResultSchema = Get-Content -Raw -Path $script:dispatchResultSchemaPath | ConvertFrom-Json -ErrorAction Stop
         $script:watcherContent = Get-Content -Raw -Path $script:watcherPath
         $script:orchestratorContent = Get-Content -Raw -Path $script:orchestratorPath
+        $script:metricsContent = Get-Content -Raw -Path $script:metricsPath
     }
 
     It 'defines release-state schema with gate and go-eligibility fields' {
@@ -56,5 +58,19 @@ Describe 'Release state Phase 2 contract' {
         $script:orchestratorContent | Should -Match "method\s*=\s*'runner-cli'"
         $script:orchestratorContent | Should -Match "method\s*=\s*'gh'"
         $script:orchestratorContent | Should -Match "method\s*=\s*'rest'"
+    }
+
+    It 'uses current skills-repo defaults and required artifact prefixes across release-state scripts' {
+        foreach ($content in @($script:watcherContent, $script:orchestratorContent, $script:metricsContent)) {
+            $content | Should -Match "svelderrainruiz/labview-icon-editor-codex-skills"
+            $content | Should -Match 'docker-contract-ppl-bundle-windows-x64-'
+            $content | Should -Match 'docker-contract-ppl-bundle-linux-x64-'
+            $content | Should -Match 'docker-contract-vip-package-self-hosted-'
+            $content | Should -Not -Match 'lv_icon_x64\.lvlibp'
+            $content | Should -Not -Match 'lv_icon_x86\.lvlibp'
+            $content | Should -Not -Match 'conformance-full'
+            $content | Should -Not -Match 'core-conformance-linux-evidence'
+            $content | Should -Not -Match 'core-conformance-windows-evidence'
+        }
     }
 }

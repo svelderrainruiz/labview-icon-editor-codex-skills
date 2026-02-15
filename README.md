@@ -21,7 +21,12 @@ The release assets are pinned by the source project lock file and validated by:
 
 CI-gated release contract:
 - Primary release gate is this repository's `CI Pipeline` workflow (`.github/workflows/ci.yml`) invoked by `release-skill-layer`.
-- `release-skill-layer` dispatch remains explicit for source project pinning (`consumer_repo`, `consumer_ref`, `consumer_sha`), then passes those values into reusable `ci.yml`.
+- `release-skill-layer` supports deterministic post-merge automation:
+  - `push` to `main` resolves release context from repo defaults and runs release automatically when eligible.
+  - `workflow_dispatch` remains available for explicit operator overrides (`consumer_repo`, `consumer_ref`, `consumer_sha`, and optional LabVIEW inputs).
+  - auto path derives `release_tag` from `manifest.json` (`v<manifest.version>`).
+  - auto path skips cleanly with `skip_reason=tag_exists` when that tag already exists.
+- source project pin defaults for auto-release are derived from `.github/workflows/ci.yml` reusable workflow defaults.
 - Release payload includes the NSIS installer and core CI artifacts:
   - `lvie-codex-skill-layer-installer.exe`
   - `lvie-ppl-bundle-windows-x64.zip`
@@ -29,6 +34,18 @@ CI-gated release contract:
   - `lvie-vip-package-self-hosted.zip`
   - `release-provenance.json`
   - `release-payload-manifest.json`
+
+## Post-merge release automation
+- Workflow: `.github/workflows/release-skill-layer.yml`
+- Trigger:
+  - automatic on `push` to `main`
+  - manual via `workflow_dispatch`
+- Resolver behavior:
+  - computes default `release_tag` from `manifest.json` version.
+  - reads source project defaults from `.github/workflows/ci.yml` (`source_project_repo`, `source_project_ref`, `source_project_sha`, `labview_profile`).
+  - on auto path, skips release deterministically when `v<manifest.version>` already exists (`tag_exists`).
+  - on manual path, keeps explicit dispatch override semantics.
+- Skip path is non-failure and records summary under job `release-skipped`.
 
 Installer contract:
 - Canonical NSIS root: `C:\Program Files (x86)\NSIS`
@@ -40,6 +57,10 @@ Installer contract:
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, build a native self-hosted Windows VI package, then validate VIPM install/uninstall on x86.
+- Runner PowerShell policy (Windows/self-hosted):
+  - Baseline once per runner account: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force`
+  - Verify: `Get-ExecutionPolicy -List`
+  - CI auto-corrects drift with `scripts/Initialize-RunnerPowerShellPolicy.ps1` and emits `runner-policy.*` diagnostics before failing when policy remains non-compliant.
 - Trigger: all pull requests and manual `workflow_dispatch` with optional inputs:
   - `labview_profile` (target preset id, default `lv2026`)
   - `source_labview_version_override` (effective `.lvversion` override, format `major.minor`, minimum `20.0`)
@@ -185,9 +206,9 @@ Installer contract:
     - `commands/uninstall.txt`
     - `commands/list-after-uninstall.txt`
 - Local run (PowerShell image):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
+  - `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1`
 - Local diagnostics suite exercise (bounded Docker):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PrepareVipbDiagnosticsLocal.ps1`
+  - `pwsh -NoProfile -File ./scripts/Invoke-PrepareVipbDiagnosticsLocal.ps1`
   - Default bounds: `--memory=3g`, `--cpus=2`, timeout `300s`.
   - Fast triage order:
     1. `vipb-diagnostics-summary.md`
@@ -195,7 +216,7 @@ Installer contract:
     3. `prepare-vipb.log`
     4. `vipb.before.xml` vs `vipb.after.xml`
 - Local run (NI LabVIEW Linux image already on this machine):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux' -BootstrapPowerShell`
+  - `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux' -BootstrapPowerShell`
 - Deterministic NI local iteration (recommended):
   - Build once: `docker build -t nationalinstruments/labview:2026q1-linux-pwsh -f docker/ni-lv-pwsh.Dockerfile .`
   - Optional pin override at build time: `docker build --build-arg PESTER_VERSION=5.7.1 -t nationalinstruments/labview:2026q1-linux-pwsh -f docker/ni-lv-pwsh.Dockerfile .`
@@ -203,7 +224,7 @@ Installer contract:
     - Supported archive types: `tar.gz`/`tgz`/`zip`
     - Contract: if either `VIPM_CLI_URL` or `VIPM_CLI_SHA256` is set, both must be provided.
     - Image install path: `/usr/local/bin/vipm`
-  - Run tests: `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh'`
+  - Run tests: `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh'`
 
 ### What to test after image changes
 - Verify tools in image:
@@ -211,32 +232,32 @@ Installer contract:
 - Verify native VIPM (when `VIPM_CLI_*` build args were provided):
   - `docker run --rm nationalinstruments/labview:2026q1-linux-pwsh bash -lc "command -v vipm >/dev/null && (vipm --version || vipm version)"`
 - Fast smoke test (one suite):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/ManifestContract.Tests.ps1'`
+  - `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/ManifestContract.Tests.ps1'`
 - Full contract suite:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/*.Tests.ps1'`
+  - `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/*.Tests.ps1'`
 - VIPM activation contract on NI image:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/VipmCliActivationContract.Tests.ps1'`
+  - `pwsh -NoProfile -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/VipmCliActivationContract.Tests.ps1'`
   - Covers `VIPM_COMMUNITY_EDITION=true` => `vipm activate` preflight behavior.
 
 ## Autonomous CI loop
 - Continuous autonomous branch integration helper:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1`
 - Typical bounded smoke run (1 cycle, stop on failure):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1 -MaxCycles 1 -StopOnFailure`
 - Pass workflow dispatch inputs (`key=value`) repeatedly:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=develop"`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1 -WorkflowInput "ppl_build_lane=linux-container" -WorkflowInput "consumer_ref=develop"`
   - If `consumer_ref` is omitted, the loop now defaults it to `develop`.
 - Backend selection (phase-1 runner-cli adapter):
   - `-DispatchBackend auto|runner-cli|gh` (default `auto`)
   - `-RunQueryBackend auto|runner-cli|gh` (default `auto`)
   - In `auto`, loop prefers `runner-cli` when available and falls back to `gh`.
 - Built-in package triage profile (reaches `package-vip-linux` even when consumer parity scripts are missing):
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux`
   - Profile injects both `windows_build_command` and `linux_build_command` stubs so parallel PPL jobs can complete without consumer parity scripts.
 - Remediation mode with VIPM CLI injection during image fallback builds:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux -VipmCliUrl "<artifact-url>" -VipmCliSha256 "<sha256>" -VipmCliArchiveType tar.gz`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1 -TriagePackageVipLinux -VipmCliUrl "<artifact-url>" -VipmCliSha256 "<sha256>" -VipmCliArchiveType tar.gz`
 - Optional JSONL log output:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
+  - `pwsh -NoProfile -File ./scripts/Invoke-AutonomousCiLoop.ps1 -LogPath ./artifacts/release-state/autonomous-ci-loop.jsonl`
   - Each cycle now records `workflow_run.vipm_help_preview` with `observed`, `usage_line_observed`, `source`, and `check_error`.
   - Each cycle also records `workflow_run.dispatch_response` with `exit_code` and `output_preview` from the dispatch command.
   - `workflow_run.dispatch_response.method` indicates the backend used (`runner-cli` or `gh`).
@@ -250,3 +271,9 @@ Installer contract:
   - `auto`: tries `runner-cli` (if present), then `gh`, then REST API token fallback.
   - `runner-cli`/`gh`/`rest`: force a specific backend and fail fast if unavailable.
 
+  - `docker-contract-pylavi-source-project-<run_id>` containing:
+    - `pylavi-docker.status.json`
+    - `pylavi-docker.result.json`
+    - `pylavi-docker.log`
+    - `vi-validate.stdout.txt`
+    - `vi-validate.stderr.txt`
