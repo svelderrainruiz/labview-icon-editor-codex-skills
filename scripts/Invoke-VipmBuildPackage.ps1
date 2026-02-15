@@ -143,6 +143,196 @@ function Wait-ForIdleProcess {
     throw "Timed out waiting for processes to exit: $($ProcessNames -join ', ')"
 }
 
+function Get-LabVIEWInstallRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$LabVIEWYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    if ($Bitness -eq '32') {
+        return "C:\Program Files (x86)\National Instruments\LabVIEW $LabVIEWYear"
+    }
+
+    return "C:\Program Files\National Instruments\LabVIEW $LabVIEWYear"
+}
+
+function Get-TargetLabVIEWProcesses {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$LabVIEWYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $installRoot = Get-LabVIEWInstallRoot -LabVIEWYear $LabVIEWYear -Bitness $Bitness
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name='LabVIEW.exe'" -ErrorAction SilentlyContinue)
+    if ($processes.Count -eq 0) {
+        return @()
+    }
+
+    return @($processes | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+}
+
+function Get-VipmProcesses {
+    return @(Get-Process -Name 'vipm' -ErrorAction SilentlyContinue)
+}
+
+function Resolve-LabVIEWCliPort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$LabVIEWYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $bitnessEnvName = "LVIE_LABVIEWCLI_PORT_{0}" -f $Bitness
+    foreach ($envName in @($bitnessEnvName, 'LVIE_LABVIEWCLI_PORT')) {
+        $value = [Environment]::GetEnvironmentVariable($envName)
+        if (-not [string]::IsNullOrWhiteSpace($value) -and $value.Trim() -match '^\d+$') {
+            return $value.Trim()
+        }
+    }
+
+    $installRoot = Get-LabVIEWInstallRoot -LabVIEWYear $LabVIEWYear -Bitness $Bitness
+    $iniPath = Join-Path $installRoot 'LabVIEW.ini'
+    if (Test-Path -LiteralPath $iniPath -PathType Leaf) {
+        foreach ($line in Get-Content -LiteralPath $iniPath -ErrorAction SilentlyContinue) {
+            if ($line -match '^\s*server\.tcp\.port\s*=\s*(\d+)\s*$') {
+                return $Matches[1]
+            }
+        }
+    }
+
+    return '3363'
+}
+
+function Invoke-LabVIEWCliClose {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$LabVIEWYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $labviewCli = Get-Command -Name 'LabVIEWCLI' -ErrorAction SilentlyContinue
+    if ($null -eq $labviewCli) {
+        Write-Log "LabVIEWCLI not available on PATH; skipping graceful LabVIEW close attempt."
+        return $false
+    }
+
+    $installRoot = Get-LabVIEWInstallRoot -LabVIEWYear $LabVIEWYear -Bitness $Bitness
+    $labviewPath = Join-Path $installRoot 'LabVIEW.exe'
+    $portNumber = Resolve-LabVIEWCliPort -LabVIEWYear $LabVIEWYear -Bitness $Bitness
+
+    $args = @(
+        '-LogToConsole', 'TRUE',
+        '-OperationName', 'CloseLabVIEW',
+        '-LabVIEWPath', $labviewPath,
+        '-PortNumber', $portNumber
+    )
+
+    Write-Log ("Executing LabVIEWCLI close ({0}-bit, port {1})." -f $Bitness, $portNumber)
+    $output = & LabVIEWCLI @args 2>&1
+    $exitCode = $LASTEXITCODE
+    foreach ($line in @($output)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            Write-Log ([string]$line)
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        Write-Log ("LabVIEWCLI CloseLabVIEW returned exit code {0}." -f $exitCode)
+        return $false
+    }
+
+    return $true
+}
+
+function Stop-ProcessesById {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int[]]$ProcessIds,
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    foreach ($processId in $ProcessIds) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Write-Log ("Force-stopped {0} process PID {1}." -f $Label, $processId)
+        } catch {
+            Write-Log ("Failed to force-stop {0} process PID {1}: {2}" -f $Label, $processId, $_.Exception.Message)
+        }
+    }
+}
+
+function Ensure-ProcessIsolation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$LabVIEWYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness,
+        [Parameter(Mandatory = $true)]
+        [int]$TimeoutSeconds,
+        [Parameter(Mandatory = $true)]
+        [int]$PollSeconds
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $attemptedGracefulClose = $false
+    while ((Get-Date) -lt $deadline) {
+        $labviewProcesses = @(Get-TargetLabVIEWProcesses -LabVIEWYear $LabVIEWYear -Bitness $Bitness)
+        $vipmProcesses = @(Get-VipmProcesses)
+        if ($labviewProcesses.Count -eq 0 -and $vipmProcesses.Count -eq 0) {
+            return
+        }
+
+        if (-not $attemptedGracefulClose -and $labviewProcesses.Count -gt 0) {
+            Write-Log ("Detected running target LabVIEW process(es): {0}" -f (($labviewProcesses | ForEach-Object { $_.ProcessId }) -join ', '))
+            [void](Invoke-LabVIEWCliClose -LabVIEWYear $LabVIEWYear -Bitness $Bitness)
+            Start-Sleep -Seconds 2
+            [void](Invoke-LabVIEWCliClose -LabVIEWYear $LabVIEWYear -Bitness $Bitness)
+            Start-Sleep -Seconds 2
+            $attemptedGracefulClose = $true
+        }
+
+        Start-Sleep -Seconds $PollSeconds
+    }
+
+    $labviewAfterWait = @(Get-TargetLabVIEWProcesses -LabVIEWYear $LabVIEWYear -Bitness $Bitness)
+    $vipmAfterWait = @(Get-VipmProcesses)
+
+    if ($labviewAfterWait.Count -gt 0) {
+        Stop-ProcessesById -ProcessIds @($labviewAfterWait | ForEach-Object { [int]$_.ProcessId }) -Label 'LabVIEW'
+    }
+    if ($vipmAfterWait.Count -gt 0) {
+        Stop-ProcessesById -ProcessIds @($vipmAfterWait | ForEach-Object { [int]$_.Id }) -Label 'VIPM'
+    }
+
+    Start-Sleep -Seconds ([Math]::Max(1, [Math]::Min(5, $PollSeconds)))
+    $remainingLabview = @(Get-TargetLabVIEWProcesses -LabVIEWYear $LabVIEWYear -Bitness $Bitness)
+    $remainingVipm = @(Get-VipmProcesses)
+    if ($remainingLabview.Count -gt 0 -or $remainingVipm.Count -gt 0) {
+        $remaining = New-Object 'System.Collections.Generic.List[string]'
+        if ($remainingLabview.Count -gt 0) {
+            $remaining.Add(("labview(pid={0})" -f (($remainingLabview | ForEach-Object { $_.ProcessId }) -join ',')))
+        }
+        if ($remainingVipm.Count -gt 0) {
+            $remaining.Add(("vipm(pid={0})" -f (($remainingVipm | ForEach-Object { $_.Id }) -join ',')))
+        }
+        throw "Timed out waiting for processes to exit: $($remaining -join '; ')"
+    }
+}
+
 function Invoke-VipmCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -414,8 +604,8 @@ try {
     }
 
     if ($EnforceLabVIEWProcessIsolation.IsPresent) {
-        Write-Log ("Waiting for idle processes before build: labview, vipm (timeout={0}s)." -f $WaitTimeoutSeconds)
-        Wait-ForIdleProcess -ProcessNames @('labview', 'vipm') -TimeoutSeconds $WaitTimeoutSeconds -PollSeconds $WaitPollSeconds
+        Write-Log ("Waiting for isolated tooling state before build: labview({0}-bit) + vipm (timeout={1}s)." -f $LabVIEWBitness, $WaitTimeoutSeconds)
+        Ensure-ProcessIsolation -LabVIEWYear $LabVIEWVersionYear -Bitness $LabVIEWBitness -TimeoutSeconds $WaitTimeoutSeconds -PollSeconds $WaitPollSeconds
         $result.preflight.process_isolation_succeeded = $true
     } else {
         $result.preflight.process_isolation_succeeded = $true
