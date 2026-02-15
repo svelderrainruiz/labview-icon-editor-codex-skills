@@ -181,11 +181,11 @@ jobs:
           @(
             '## Source target resolver'
             ''
-            ("- source_project_repo: `{0}`" -f $consumerRepo)
-            ("- source_project_ref: `{0}`" -f $consumerRef)
-            ("- source_project_sha: `{0}`" -f $consumerSha)
-            ("- labview_profile: `{0}`" -f $labviewProfile)
-            ("- parity_enforcement_profile: `{0}`" -f $parityProfile)
+            "- source_project_repo: $consumerRepo"
+            "- source_project_ref: $consumerRef"
+            "- source_project_sha: $consumerSha"
+            "- labview_profile: $labviewProfile"
+            "- parity_enforcement_profile: $parityProfile"
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   validate-pylavi-docker-source-project:
