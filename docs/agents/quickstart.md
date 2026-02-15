@@ -97,7 +97,8 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - On LV2020 smoke failure, CI may run a diagnostic-only LV2026 x64 control probe (for comparable outcomes like `no_testcases` / `failed_testcases`) and writes comparative results into `lunit-smoke.result.json` and the job summary.
 - CI invokes `Invoke-LunitSmokeLv2020.ps1` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before LV2020 run and before any LV2026 control probe.
 - If process isolation cannot clear active LabVIEW instances, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
-- CI invokes `-AllowNoTestcasesWhenControlProbePasses`; when LV2020 outcome is `no_testcases` and LV2026 control probe passes, the smoke job passes with advisory `lv2020_no_testcases_control_probe_passed`.
+- Required lane is strict: `run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses`.
+- `-AllowNoTestcasesWhenControlProbePasses` is limited to optional `run-lunit-smoke-lv2020x64-edge`.
 - All other LV2020 smoke failures remain blocking for downstream self-hosted jobs.
 - Triage order for LV2020 smoke:
   1. `lunit-smoke.result.json`

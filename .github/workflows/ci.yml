@@ -170,8 +170,7 @@ jobs:
             -RequiredBitness '64' `
             -OutputDirectory $outputDirectory `
             -OverrideLvversion '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}' `
-            -EnforceLabVIEWProcessIsolation `
-            -AllowNoTestcasesWhenControlProbePasses
+            -EnforceLabVIEWProcessIsolation
 
       - name: Publish LabVIEW 2020 LUnit smoke summary
         if: always()

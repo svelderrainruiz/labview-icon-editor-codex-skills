@@ -90,7 +90,8 @@ Installer contract:
   - when LV2020 smoke fails with comparable validation outcomes (`no_testcases` or `failed_testcases`), the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary.
   - CI runs `run-lunit-smoke-lv2020x64` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before the LV2020 run and again before any LV2026 control probe.
   - if active LabVIEW processes cannot be cleared, the control probe is skipped with explicit reason `skipped_unable_to_clear_active_labview_processes`.
-  - CI also sets `-AllowNoTestcasesWhenControlProbePasses`; if LV2020 reports `no_testcases` and the LV2026 control probe passes, the gate is marked pass with advisory type `lv2020_no_testcases_control_probe_passed`.
+  - required lane behavior is strict: LV2020 `no_testcases` still fails even when LV2026 control probe passes.
+  - `-AllowNoTestcasesWhenControlProbePasses` is limited to the optional `run-lunit-smoke-lv2020x64-edge` diagnostics lane.
   - all other LV2020 failures still hard-fail the gate.
   - all self-hosted jobs enforce source project remote hygiene via `scripts/Assert-SourceProjectRemotes.ps1`:
     - configure `upstream` to `https://github.com/${{ env.CONSUMER_REPO }}.git`

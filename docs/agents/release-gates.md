@@ -73,11 +73,11 @@ Optional inputs:
   - job key remains `run-lunit-smoke-lv2020x64` for compatibility, but execution target year is resolved from effective LabVIEW target selection.
   - when `source_labview_version_override` is provided, it must be `major.minor` and `>=20.0`, and becomes the effective CI target.
   - when override is not provided, observed source project `.lvversion` is used.
-  - LV2020 failure is blocking, except for the CI-configured advisory case below.
+  - LV2020 failure is blocking.
   - a diagnostic-only LV2026 x64 control probe may run on comparable failures (`no_testcases` / `failed_testcases`) to improve root-cause clarity, but it does not change gate outcome.
   - CI enforces process isolation (`-EnforceLabVIEWProcessIsolation`) and clears active LabVIEW processes before LV2020 run and before control probe.
   - if active LabVIEW processes cannot be cleared, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
-  - CI enables `-AllowNoTestcasesWhenControlProbePasses`; if LV2020 result is `no_testcases` and LV2026 control probe passes, the smoke job is pass-with-advisory (`lv2020_no_testcases_control_probe_passed`).
+  - `-AllowNoTestcasesWhenControlProbePasses` is only used by optional `run-lunit-smoke-lv2020x64-edge`.
 - optional non-gating LV2020 edge smoke:
   - enabled via `run_lv2020_edge_smoke: true`
   - runs in `run-lunit-smoke-lv2020x64-edge`
