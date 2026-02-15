@@ -36,6 +36,8 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'run_build_spec:'
         $script:releaseContent | Should -Match '\(Deprecated\) retained for dispatch compatibility'
         $script:releaseContent | Should -Match 'labview_profile:'
+        $script:releaseContent | Should -Match 'source_labview_version_override:'
+        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:'
     }
 
     It 'passes source project pin inputs into reusable CI gate' {
@@ -43,6 +45,8 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'source_project_ref:\s*\$\{\{ inputs\.consumer_ref \}\}'
         $script:releaseContent | Should -Match 'source_project_sha:\s*\$\{\{ inputs\.consumer_sha \}\}'
         $script:releaseContent | Should -Match 'labview_profile:\s*\$\{\{ inputs\.labview_profile \}\}'
+        $script:releaseContent | Should -Match 'source_labview_version_override:\s*\$\{\{ inputs\.source_labview_version_override \}\}'
+        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:\s*\$\{\{ inputs\.run_lv2020_edge_smoke \}\}'
     }
 
     It 'packages vipm-cli-machine and linux-ppl-container-build modules in installer staging' {
@@ -84,6 +88,8 @@ Describe 'Release workflow contract' {
         $script:ciContent | Should -Match 'source_project_ref:'
         $script:ciContent | Should -Match 'source_project_sha:'
         $script:ciContent | Should -Match 'labview_profile:'
+        $script:ciContent | Should -Match 'source_labview_version_override:'
+        $script:ciContent | Should -Match 'run_lv2020_edge_smoke:'
     }
 }
 

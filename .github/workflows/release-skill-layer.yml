@@ -35,6 +35,16 @@ on:
         required: false
         default: lv2026
         type: string
+      source_labview_version_override:
+        description: Optional effective source project .lvversion override (major.minor, minimum 20.0).
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: Run optional non-gating LV2020 x64 edge smoke diagnostics during CI gate.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -47,6 +57,8 @@ jobs:
       source_project_ref: ${{ inputs.consumer_ref }}
       source_project_sha: ${{ inputs.consumer_sha }}
       labview_profile: ${{ inputs.labview_profile }}
+      source_labview_version_override: ${{ inputs.source_labview_version_override }}
+      run_lv2020_edge_smoke: ${{ inputs.run_lv2020_edge_smoke }}
     secrets: inherit
 
   package:
@@ -242,6 +254,8 @@ jobs:
             release_workflow = [pscustomobject]@{
               run_self_hosted = '${{ inputs.run_self_hosted }}'
               run_build_spec = '${{ inputs.run_build_spec }}'
+              source_labview_version_override = '${{ inputs.source_labview_version_override }}'
+              run_lv2020_edge_smoke = '${{ inputs.run_lv2020_edge_smoke }}'
               nsis_root = '${{ needs.package.outputs.nsis_root }}'
             }
             assets = $assetRecords
@@ -294,6 +308,8 @@ jobs:
             '- source_project_repo: ${{ inputs.consumer_repo }}',
             '- source_project_ref: ${{ inputs.consumer_ref }}',
             '- source_project_sha: ${{ inputs.consumer_sha }}',
+            '- source_labview_version_override: ${{ inputs.source_labview_version_override }}',
+            '- run_lv2020_edge_smoke: ${{ inputs.run_lv2020_edge_smoke }}',
             '- nsis_root: ${{ needs.package.outputs.nsis_root }}',
             '- run_self_hosted: ${{ inputs.run_self_hosted }} (deprecated)',
             '- run_build_spec: ${{ inputs.run_build_spec }} (deprecated)'

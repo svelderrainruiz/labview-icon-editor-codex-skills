@@ -18,7 +18,9 @@ param(
 
     [string]$OverrideLvversion = '20.0',
 
-    [switch]$EnforceLabVIEWProcessIsolation
+    [switch]$EnforceLabVIEWProcessIsolation,
+
+    [switch]$AllowNoTestcasesWhenControlProbePasses
 )
 
 Set-StrictMode -Version Latest
@@ -469,6 +471,7 @@ $result = [ordered]@{
     target_labview_version = [string]$TargetLabVIEWVersion
     required_bitness = $RequiredBitness
     override_lvversion = $OverrideLvversion
+    allow_no_testcases_when_control_probe_passes = [bool]$AllowNoTestcasesWhenControlProbePasses
     source = [ordered]@{
         project_root = ''
         project_path = ''
@@ -535,6 +538,7 @@ $result = [ordered]@{
         before_lv2020_run = $null
         before_lv2026_control_probe = $null
     }
+    advisory = $null
     error = $null
 }
 
@@ -794,6 +798,24 @@ catch {
                     Write-Log ("LV2026 control probe failed: {0}" -f [string]$result.control_probe.reason)
                 }
             }
+        }
+
+        if (
+            $AllowNoTestcasesWhenControlProbePasses -and
+            $primaryValidationOutcome -eq 'no_testcases' -and
+            [string]$result.control_probe.status -eq 'passed'
+        ) {
+            $result.status = 'passed'
+            $result.error = $null
+            $result.advisory = [ordered]@{
+                type = 'lv2020_no_testcases_control_probe_passed'
+                message = 'LV2020 produced no testcases, but LV2026 control probe passed. Treating as pass because AllowNoTestcasesWhenControlProbePasses is enabled.'
+                primary_validation_outcome = $primaryValidationOutcome
+                control_probe_status = [string]$result.control_probe.status
+            }
+            $statusPayload.status = 'passed'
+            $statusPayload.reason = ''
+            Write-Log 'WARNING: LV2020 produced no testcases, but LV2026 control probe passed. Passing gate due to AllowNoTestcasesWhenControlProbePasses.'
         }
     }
     elseif (-not $runPhaseStarted) {

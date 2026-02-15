@@ -23,6 +23,7 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match '\$OutputDirectory'
         $script:scriptContent | Should -Match '\$OverrideLvversion'
         $script:scriptContent | Should -Match '\$EnforceLabVIEWProcessIsolation'
+        $script:scriptContent | Should -Match '\$AllowNoTestcasesWhenControlProbePasses'
         $script:scriptContent | Should -Match 'ValidateSet\(''64''\)'
     }
 
@@ -45,6 +46,8 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match 'Ensure-LabVIEWProcessQuiescence'
         $script:scriptContent | Should -Match 'skipped_active_labview_processes'
         $script:scriptContent | Should -Match 'skipped_unable_to_clear_active_labview_processes'
+        $script:scriptContent | Should -Match 'allow_no_testcases_when_control_probe_passes'
+        $script:scriptContent | Should -Match 'lv2020_no_testcases_control_probe_passed'
         $script:scriptContent | Should -Match 'eligibleControlOutcomes = @\(''no_testcases'', ''failed_testcases''\)'
         $script:scriptContent | Should -Match 'lunit-smoke\.status\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.result\.json'
@@ -303,6 +306,91 @@ exit /b 0
             }
 
             [string](Get-Content -LiteralPath (Join-Path $sourceRoot '.lvversion') -Raw).Trim() | Should -Be '26.0'
+        }
+        finally {
+            $env:PATH = $originalPath
+            if (Test-Path -LiteralPath $tempRoot -PathType Container) {
+                Remove-Item -LiteralPath $tempRoot -Recurse -Force
+            }
+        }
+    }
+
+    It 'allows no-testcase LV2020 outcome when control probe passes and override switch is enabled' {
+        $tempRoot = Join-Path $env:TEMP ("lunit-smoke-no-testcases-allow-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        $originalPath = $env:PATH
+        try {
+            $sourceRoot = Join-Path $tempRoot 'source'
+            New-Item -Path $sourceRoot -ItemType Directory -Force | Out-Null
+            '26.0' | Set-Content -LiteralPath (Join-Path $sourceRoot '.lvversion') -Encoding ASCII
+            '@project' | Set-Content -LiteralPath (Join-Path $sourceRoot 'lv_icon_editor.lvproj') -Encoding ASCII
+
+            $binDir = Join-Path $tempRoot 'bin'
+            New-Item -Path $binDir -ItemType Directory -Force | Out-Null
+            $mockGcliPath = Join-Path $binDir 'g-cli.cmd'
+            @'
+@echo off
+setlocal EnableDelayedExpansion
+set "reportPath="
+set "lvver="
+:parse
+if "%~1"=="" goto parsed
+if /I "%~1"=="--lv-ver" (
+  set "lvver=%~2"
+)
+if /I "%~1"=="-r" (
+  set "reportPath=%~2"
+)
+shift
+goto parse
+:parsed
+if "%reportPath%"=="" (
+  echo Missing Parameters: report_path
+  exit /b 1
+)
+for %%I in ("%reportPath%") do (
+  if not exist "%%~dpI" mkdir "%%~dpI"
+)
+if "%lvver%"=="2020" (
+  >"%reportPath%" echo ^<testsuites /^>
+  exit /b 23
+)
+>"%reportPath%" echo ^<testsuite^>^<testcase name="Control" classname="LV2026" status="Passed" /^>^</testsuite^>
+exit /b 0
+'@ | Set-Content -LiteralPath $mockGcliPath -Encoding ASCII
+
+            $mockVipmPath = Join-Path $binDir 'vipm.cmd'
+            @'
+@echo off
+if /I "%~1"=="--labview-version" goto list
+echo Unsupported mock invocation
+exit /b 1
+:list
+echo Found 2 packages:
+echo (astemes_lib_lunit v1.12.5.6)
+echo (sas_workshops_lib_lunit_for_g_cli v1.2.0.83)
+exit /b 0
+'@ | Set-Content -LiteralPath $mockVipmPath -Encoding ASCII
+            $env:PATH = "$binDir;$originalPath"
+
+            $outputDirectory = Join-Path $tempRoot 'output'
+            & $script:scriptPath `
+                -SourceProjectRoot $sourceRoot `
+                -OutputDirectory $outputDirectory `
+                -TargetLabVIEWVersion 2020 `
+                -RequiredBitness '64' `
+                -OverrideLvversion '20.0' `
+                -AllowNoTestcasesWhenControlProbePasses
+
+            $statusPayload = Get-Content -LiteralPath (Join-Path $outputDirectory 'lunit-smoke.status.json') -Raw | ConvertFrom-Json
+            [string]$statusPayload.status | Should -Be 'passed'
+
+            $resultPayload = Get-Content -LiteralPath (Join-Path $outputDirectory 'lunit-smoke.result.json') -Raw | ConvertFrom-Json
+            [string]$resultPayload.status | Should -Be 'passed'
+            [string]$resultPayload.report.validation_outcome | Should -Be 'no_testcases'
+            [string]$resultPayload.control_probe.status | Should -Be 'passed'
+            [string]$resultPayload.advisory.type | Should -Be 'lv2020_no_testcases_control_probe_passed'
+            [string]$resultPayload.advisory.message | Should -Match 'AllowNoTestcasesWhenControlProbePasses'
         }
         finally {
             $env:PATH = $originalPath

@@ -23,6 +23,16 @@ on:
         required: false
         default: 'lv2026'
         type: string
+      source_labview_version_override:
+        description: 'Optional effective source project .lvversion override (major.minor, minimum 20.0)'
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: 'Run optional non-gating LV2020 x64 edge smoke diagnostics'
+        required: false
+        default: false
+        type: boolean
   pull_request:
   workflow_dispatch:
     inputs:
@@ -31,6 +41,16 @@ on:
         required: false
         default: 'lv2026'
         type: string
+      source_labview_version_override:
+        description: 'Optional effective source project .lvversion override (major.minor, minimum 20.0)'
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: 'Run optional non-gating LV2020 x64 edge smoke diagnostics'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -46,6 +66,8 @@ env:
   VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
   LABVIEW_PROFILES_ROOT: profiles/labview
   DEFAULT_LABVIEW_PROFILE: ${{ inputs.labview_profile || 'lv2026' }}
+  SOURCE_LVVERSION_OVERRIDE: ${{ inputs.source_labview_version_override || '' }}
+  RUN_LV2020_EDGE_SMOKE: ${{ inputs.run_lv2020_edge_smoke || 'false' }}
   LABVIEW_VERSION: '2026'
   BITNESS: '64'
 
@@ -77,8 +99,11 @@ jobs:
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
   run-lunit-smoke-lv2020x64:
-    runs-on: [self-hosted, windows, self-hosted-windows-lv2020x64]
-    needs: [contract-tests]
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
+    needs: [contract-tests, resolve-labview-profile]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -129,7 +154,7 @@ jobs:
             ("- Action: {0}" -f [string]$result.action_taken)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Run native LabVIEW 2020 LUnit smoke (x64)
+      - name: Run native LabVIEW LUnit smoke (x64, source-version target)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -141,11 +166,12 @@ jobs:
 
           & "$env:GITHUB_WORKSPACE/scripts/Invoke-LunitSmokeLv2020.ps1" `
             -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
-            -TargetLabVIEWVersion 2020 `
+            -TargetLabVIEWVersion ${{ needs.resolve-labview-profile.outputs.effective_labview_year }} `
             -RequiredBitness '64' `
             -OutputDirectory $outputDirectory `
-            -OverrideLvversion '20.0' `
-            -EnforceLabVIEWProcessIsolation
+            -OverrideLvversion '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}' `
+            -EnforceLabVIEWProcessIsolation `
+            -AllowNoTestcasesWhenControlProbePasses
 
       - name: Publish LabVIEW 2020 LUnit smoke summary
         if: always()
@@ -155,7 +181,11 @@ jobs:
           $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020'
           $statusPath = Join-Path $outputDirectory 'lunit-smoke.status.json'
           $resultPath = Join-Path $outputDirectory 'lunit-smoke.result.json'
-          $reportPath = Join-Path $outputDirectory 'reports/lunit-report-lv2020-x64.xml'
+          $targetLabVIEWVersion = '${{ needs.resolve-labview-profile.outputs.effective_labview_year }}'
+          $effectiveLvversionRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $observedSourceLvversionRaw = '${{ needs.resolve-labview-profile.outputs.observed_source_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+          $reportPath = Join-Path $outputDirectory ("reports/lunit-report-lv{0}-x64.xml" -f $targetLabVIEWVersion)
           $artifactName = "docker-contract-lunit-smoke-lv2020-$env:GITHUB_RUN_ID"
 
           $status = 'unknown'
@@ -180,8 +210,10 @@ jobs:
           $controlProbeReason = ''
           $controlProbeValidation = ''
           $controlProbeRunExit = ''
-          $controlProbeReportPath = Join-Path $outputDirectory 'reports/lunit-report-2026-control.xml'
+          $controlProbeReportPath = Join-Path $outputDirectory 'reports/lunit-report-lv2026-x64-control.xml'
           $controlProbeActiveProcesses = ''
+          $advisoryType = ''
+          $advisoryMessage = ''
           if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
             try {
               $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
@@ -190,6 +222,9 @@ jobs:
               }
               if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.validation_outcome) {
                 $validationOutcome = [string]$resultPayload.report.validation_outcome
+              }
+              if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.path -and -not [string]::IsNullOrWhiteSpace([string]$resultPayload.report.path)) {
+                $reportPath = [string]$resultPayload.report.path
               }
               if ($null -ne $resultPayload.control_probe) {
                 $controlProbeStatus = [string]$resultPayload.control_probe.status
@@ -205,6 +240,10 @@ jobs:
                   $controlProbeActiveProcesses = (@($resultPayload.control_probe.active_labview_processes) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ', '
                 }
               }
+              if ($null -ne $resultPayload.advisory) {
+                $advisoryType = [string]$resultPayload.advisory.type
+                $advisoryMessage = [string]$resultPayload.advisory.message
+              }
             } catch {
               if ([string]::IsNullOrWhiteSpace($reason)) {
                 $reason = "Unable to parse result payload: $($_.Exception.Message)"
@@ -213,11 +252,15 @@ jobs:
           }
 
           $summary = @(
-            '## LabVIEW 2020 LUnit Smoke (x64)'
+            '## LabVIEW LUnit Smoke (x64)'
             ''
             ("- Status: {0}" -f $status)
+            ("- Effective LabVIEW version: {0}" -f $targetLabVIEWVersion)
+            ("- Effective .lvversion: {0}" -f $effectiveLvversionRaw)
+            ("- Observed source .lvversion: {0}" -f $observedSourceLvversionRaw)
+            ("- Override active: {0}" -f $overrideActive)
             '- Bitness: 64'
-            ("- LV2020 report path: {0}" -f $reportPath)
+            ("- Primary report path: {0}" -f $reportPath)
             ("- Artifact: {0}" -f $artifactName)
           )
 
@@ -229,6 +272,12 @@ jobs:
           }
           if (-not [string]::IsNullOrWhiteSpace($reason)) {
             $summary += ("- Reason: {0}" -f $reason.Replace("`r", ' ').Replace("`n", ' '))
+          }
+          if (-not [string]::IsNullOrWhiteSpace($advisoryType)) {
+            $summary += ("- Advisory type: {0}" -f $advisoryType)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($advisoryMessage)) {
+            $summary += ("- Advisory: {0}" -f $advisoryMessage.Replace("`r", ' ').Replace("`n", ' '))
           }
           $controlProbeWasRelevant = (
             (-not [string]::IsNullOrWhiteSpace($controlProbeStatus) -and $controlProbeStatus -ne 'not_run') -or
@@ -264,6 +313,77 @@ jobs:
         with:
           name: docker-contract-lunit-smoke-lv2020-${{ github.run_id }}
           path: ${{ runner.temp }}/lunit-smoke-lv2020
+          if-no-files-found: error
+
+  run-lunit-smoke-lv2020x64-edge:
+    if: ${{ inputs.run_lv2020_edge_smoke == true || inputs.run_lv2020_edge_smoke == 'true' }}
+    runs-on:
+      - self-hosted
+      - windows
+      - self-hosted-windows-lv2020x64
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-lunit-edge'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+      - name: Run optional LV2020 x64 edge smoke (non-gating)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020-edge'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-LunitSmokeLv2020.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -TargetLabVIEWVersion 2020 `
+            -RequiredBitness '64' `
+            -OutputDirectory $outputDirectory `
+            -OverrideLvversion '20.0' `
+            -EnforceLabVIEWProcessIsolation `
+            -AllowNoTestcasesWhenControlProbePasses
+
+      - name: Upload optional LV2020 x64 edge smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-lunit-smoke-lv2020-edge-${{ github.run_id }}
+          path: ${{ runner.temp }}/lunit-smoke-lv2020-edge
           if-no-files-found: error
 
   build-x64-ppl-windows:
@@ -673,6 +793,10 @@ jobs:
       source_labview_year: ${{ steps.source-labels.outputs.source_labview_year }}
       source_runner_label_x86: ${{ steps.source-labels.outputs.source_runner_label_x86 }}
       source_runner_label_x64: ${{ steps.source-labels.outputs.source_runner_label_x64 }}
+      effective_lvversion_raw: ${{ steps.source-labels.outputs.effective_lvversion_raw }}
+      effective_labview_year: ${{ steps.source-labels.outputs.effective_labview_year }}
+      observed_source_lvversion_raw: ${{ steps.source-labels.outputs.observed_source_lvversion_raw }}
+      override_active: ${{ steps.source-labels.outputs.override_active }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -737,17 +861,39 @@ jobs:
           }
 
           $resolution = Get-Content -LiteralPath $resolutionPath -Raw | ConvertFrom-Json
-          $yearValue = [string]$resolution.consumer.lvversion_year
-          if ([string]::IsNullOrWhiteSpace($yearValue)) {
-            $rawValue = [string]$resolution.consumer.lvversion_raw
-            if ($rawValue -match '^(?<major>\d+)\.(?<minor>\d+)$') {
-              $yearValue = [string](2000 + [int]$Matches['major'])
-            }
+          $observedRawValue = [string]$resolution.consumer.lvversion_raw
+          if ([string]::IsNullOrWhiteSpace($observedRawValue)) {
+            throw "Unable to resolve observed source project .lvversion from profile resolution payload."
+          }
+          if ($observedRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw "Observed source project .lvversion '$observedRawValue' is invalid. Expected numeric major.minor format."
           }
 
-          if ($yearValue -notmatch '^\d{4}$') {
-            throw "Unable to resolve source project LabVIEW year from profile resolution payload. Value: '$yearValue'."
+          $overrideRawValue = [string]$env:SOURCE_LVVERSION_OVERRIDE
+          $overrideActive = $false
+          $effectiveRawValue = $observedRawValue
+
+          if (-not [string]::IsNullOrWhiteSpace($overrideRawValue)) {
+            $overrideRawValue = $overrideRawValue.Trim()
+            if ($overrideRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+              throw "source_labview_version_override '$overrideRawValue' is invalid. Expected numeric major.minor format."
+            }
+            $overrideMajor = [int]$Matches['major']
+            if ($overrideMajor -lt 20) {
+              throw "source_labview_version_override '$overrideRawValue' is unsupported. Minimum supported LabVIEW version is 20.0."
+            }
+            $effectiveRawValue = $overrideRawValue
+            $overrideActive = $true
           }
+
+          if ($effectiveRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw "Effective source project .lvversion '$effectiveRawValue' is invalid. Expected numeric major.minor format."
+          }
+          $effectiveMajor = [int]$Matches['major']
+          if ($effectiveMajor -lt 20) {
+            throw "Effective source project .lvversion '$effectiveRawValue' is unsupported. Minimum supported LabVIEW version is 20.0."
+          }
+          $yearValue = [string](2000 + $effectiveMajor)
 
           $labelX86 = "self-hosted-windows-lv${yearValue}x86"
           $labelX64 = "self-hosted-windows-lv${yearValue}x64"
@@ -755,8 +901,18 @@ jobs:
           "source_labview_year=$yearValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "source_runner_label_x86=$labelX86" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "source_runner_label_x64=$labelX64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "effective_lvversion_raw=$effectiveRawValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "effective_labview_year=$yearValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "observed_source_lvversion_raw=$observedRawValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "override_active=$($overrideActive.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          Write-Host "Resolved source project LabVIEW year: $yearValue"
+          if ($overrideActive -and ($effectiveRawValue -ne $observedRawValue)) {
+            Write-Host ("::warning title=Source project LabVIEW override active::source_labview_version_override '{0}' overrides observed source project .lvversion '{1}'." -f $effectiveRawValue, $observedRawValue)
+          }
+
+          Write-Host "Resolved effective source project .lvversion: $effectiveRawValue"
+          Write-Host "Resolved effective source project LabVIEW year: $yearValue"
+          Write-Host "Resolved observed source project .lvversion: $observedRawValue"
           Write-Host "Resolved x86 runner label: $labelX86"
           Write-Host "Resolved x64 runner label: $labelX64"
 
@@ -776,12 +932,19 @@ jobs:
           $profileTarget = [string]$resolution.profile.expected_vipb_target
           $consumerTarget = [string]$resolution.consumer.expected_vipb_target
           $profileId = [string]$resolution.selected_profile_id
+          $observedLvversionRaw = '${{ steps.source-labels.outputs.observed_source_lvversion_raw }}'
+          $effectiveLvversionRaw = '${{ steps.source-labels.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ steps.source-labels.outputs.override_active }}'
+          $effectiveYear = '${{ steps.source-labels.outputs.effective_labview_year }}'
 
           if ($comparison -eq 'mismatch') {
             if ([string]::IsNullOrWhiteSpace($message)) {
               $message = "Selected target preset '$profileId' differs from source project target. Source project remains authoritative."
             }
             Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $message)
+          }
+          if ($overrideActive -eq 'true' -and $effectiveLvversionRaw -ne $observedLvversionRaw) {
+            Write-Host ("::warning title=Source project LabVIEW override active::Effective .lvversion '{0}' overrides observed source project .lvversion '{1}'." -f $effectiveLvversionRaw, $observedLvversionRaw)
           }
 
           @(
@@ -791,7 +954,10 @@ jobs:
             ('- Comparison result: `{0}`' -f $comparison)
             ('- Target preset expected VIPB target: `{0}`' -f $profileTarget)
             ('- Source project expected VIPB target: `{0}`' -f $consumerTarget)
-            ('- Source project LabVIEW year: `{0}`' -f '${{ steps.source-labels.outputs.source_labview_year }}')
+            ('- Source project observed .lvversion: `{0}`' -f $observedLvversionRaw)
+            ('- Effective .lvversion: `{0}`' -f $effectiveLvversionRaw)
+            ('- Override active: `{0}`' -f $overrideActive)
+            ('- Effective source project LabVIEW year: `{0}`' -f $effectiveYear)
             ('- Source project x86 runner label: `{0}`' -f '${{ steps.source-labels.outputs.source_runner_label_x86 }}')
             '- Source project remains authoritative for VIPB target enforcement.'
             '- Artifact: `docker-contract-labview-profile-resolution-${{ github.run_id }}`'
@@ -833,6 +999,33 @@ jobs:
             throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
           }
           Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Apply effective .lvversion for VIPB prep
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (VIPB prep)'
+            ''
+            ("- Override active: `{0}`" -f $overrideActive)
+            ("- Before: `{0}`" -f $beforeRaw)
+            ("- Effective requested: `{0}`" -f $effectiveRaw)
+            ("- After: `{0}`" -f $afterRaw)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - id: labview-version
         name: Resolve LabVIEW version from source project repo
@@ -1128,8 +1321,12 @@ jobs:
           Write-Host "VIPB diagnostics suite completed with status '$status'."
 
   build-vip-self-hosted:
-    runs-on: [self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]
-    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020x64]
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
+    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020x64, resolve-labview-profile]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -1187,6 +1384,33 @@ jobs:
             ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
             ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
             ("- Action: {0}" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Apply effective .lvversion for self-hosted build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (self-hosted build)'
+            ''
+            ("- Override active: `{0}`" -f $overrideActive)
+            ("- Before: `{0}`" -f $beforeRaw)
+            ("- Effective requested: `{0}`" -f $effectiveRaw)
+            ("- After: `{0}`" -f $afterRaw)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Validate self-hosted native LabVIEW prerequisites
@@ -1486,6 +1710,33 @@ jobs:
           $vipPath = $vipCandidates[0].FullName
           "vip_file_path=$vipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Resolved VIP artifact: $vipPath"
+
+      - name: Apply effective .lvversion for x86 install smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (x86 install smoke)'
+            ''
+            ("- Override active: `{0}`" -f $overrideActive)
+            ("- Before: `{0}`" -f $beforeRaw)
+            ("- Effective requested: `{0}`" -f $effectiveRaw)
+            ("- After: `{0}`" -f $afterRaw)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Run VIPM install smoke (x86, .lvversion-driven)
         shell: pwsh

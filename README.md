@@ -40,11 +40,15 @@ Installer contract:
 ## Docker CI
 - Workflow: `.github/workflows/ci.yml`
 - Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, build a native self-hosted Windows VI package, then validate VIPM install/uninstall on x86.
-- Trigger: all pull requests and manual `workflow_dispatch` (optional `labview_profile` input for target preset id, default `lv2026`).
+- Trigger: all pull requests and manual `workflow_dispatch` with optional inputs:
+  - `labview_profile` (target preset id, default `lv2026`)
+  - `source_labview_version_override` (effective `.lvversion` override, format `major.minor`, minimum `20.0`)
+  - `run_lv2020_edge_smoke` (optional non-gating LV2020 x64 edge diagnostics, default `false`)
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
   - `contract-tests` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
+  - optional: `contract-tests` -> `run-lunit-smoke-lv2020x64-edge` (non-gating LV2020 x64 edge diagnostics)
   - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
   - `contract-tests` -> `gather-release-notes`
   - `contract-tests` -> `resolve-labview-profile`
@@ -55,8 +59,9 @@ Installer contract:
 - LabVIEW target presets (advisory):
   - target preset catalog is repo-owned under `profiles/labview`.
   - target preset resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
-  - target preset mismatch vs source project emits `::warning` + summary advisory, but does not override build target.
-  - source project `.lvversion` remains authoritative for VIPB target enforcement.
+  - target preset mismatch vs source project emits `::warning` + summary advisory.
+  - `source_labview_version_override` can intentionally set an effective `.lvversion` for CI execution (for example `26.0`, `25.0`), while source project `.lvversion` remains the observed baseline.
+  - override validation is deterministic: format `major.minor`, minimum supported version `20.0`.
 - VIPB version authority contract:
   - `prepare-vipb-linux` treats `consumer/.lvversion` (source project) as authoritative for VIPB LabVIEW target.
   - minimum supported source project `.lvversion` is `20.0`; values earlier than `20.0` fail deterministically.
@@ -76,15 +81,17 @@ Installer contract:
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - Native self-hosted packaging contract:
   - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
-  - required native LabVIEW 2020 smoke runner label: `[self-hosted, windows, self-hosted-windows-lv2020x64]`
-  - `run-lunit-smoke-lv2020x64` uses the canonical direct run command only: `g-cli --lv-ver 2020 --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
+  - required smoke/build runner labels are resolved from effective source project LabVIEW target via `resolve-labview-profile` outputs: `source_runner_label_x64` and `source_runner_label_x86` (`self-hosted-windows-lv<YYYY>x64/x86`).
+  - `run-lunit-smoke-lv2020x64` keeps the existing job key for compatibility but executes against source-year target (`--lv-ver <YYYY>`) with canonical direct run command only: `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
   - `run-lunit-smoke-lv2020x64` enforces required `64-bit` coverage only.
-  - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=20.0` there (source checkout remains unchanged).
-  - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for LV2020 x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
+  - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=<effective .lvversion>` there (source checkout remains unchanged).
+  - optional edge diagnostics lane `run-lunit-smoke-lv2020x64-edge` can be enabled with `run_lv2020_edge_smoke: true`; it always runs fixed `2020` + `20.0` and never blocks downstream gates.
+  - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for the selected smoke target year x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
   - when LV2020 smoke fails with comparable validation outcomes (`no_testcases` or `failed_testcases`), the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary.
   - CI runs `run-lunit-smoke-lv2020x64` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before the LV2020 run and again before any LV2026 control probe.
   - if active LabVIEW processes cannot be cleared, the control probe is skipped with explicit reason `skipped_unable_to_clear_active_labview_processes`.
-  - LV2020 failure still hard-fails the gate regardless of control-probe outcome.
+  - CI also sets `-AllowNoTestcasesWhenControlProbePasses`; if LV2020 reports `no_testcases` and the LV2026 control probe passes, the gate is marked pass with advisory type `lv2020_no_testcases_control_probe_passed`.
+  - all other LV2020 failures still hard-fail the gate.
   - all self-hosted jobs enforce source project remote hygiene via `scripts/Assert-SourceProjectRemotes.ps1`:
     - configure `upstream` to `https://github.com/${{ env.CONSUMER_REPO }}.git`
     - run non-interactive `git ls-remote upstream`
@@ -121,10 +128,12 @@ Installer contract:
     - `lunit-smoke.status.json`
     - `lunit-smoke.result.json`
     - `lunit-smoke.log`
-    - `reports/lunit-report-lv2020-x64.xml`
+    - `reports/lunit-report-lv<effective_year>-x64.xml`
     - `reports/lunit-report-lv2026-x64-control.xml` (only when LV2020 path fails and control probe executes)
     - `workspace/lvversion.before`
     - `workspace/lvversion.after`
+  - optional `docker-contract-lunit-smoke-lv2020-edge-<run_id>` containing:
+    - LV2020 edge diagnostics from non-gating job `run-lunit-smoke-lv2020x64-edge` when enabled
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
     - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
     - `vipb.before.xml`, `vipb.after.xml`
