@@ -26,7 +26,9 @@ CI-gated release contract:
   - `workflow_dispatch` remains available for explicit operator overrides (`consumer_repo`, `consumer_ref`, `consumer_sha`, and optional LabVIEW inputs).
   - auto path derives `release_tag` from `manifest.json` (`v<manifest.version>`).
   - auto path skips cleanly with `skip_reason=tag_exists` when that tag already exists.
-- source project pin defaults for auto-release are derived from `.github/workflows/ci.yml` reusable workflow defaults.
+- source project target resolution chain is deterministic:
+  - `workflow input` -> `repository variable` -> `fallback`
+  - strict source SHA pin is required (missing SHA fails fast).
 - Release payload includes the NSIS installer and core CI artifacts:
   - `lvie-codex-skill-layer-installer.exe`
   - `lvie-ppl-bundle-windows-x64.zip`
@@ -42,10 +44,36 @@ CI-gated release contract:
   - manual via `workflow_dispatch`
 - Resolver behavior:
   - computes default `release_tag` from `manifest.json` version.
-  - reads source project defaults from `.github/workflows/ci.yml` (`source_project_repo`, `source_project_ref`, `source_project_sha`, `labview_profile`).
+  - resolves source project target from `workflow input` -> `repository variable` -> deterministic fallback.
+  - enforces strict source SHA pin for release/CI gate execution.
   - on auto path, skips release deterministically when `v<manifest.version>` already exists (`tag_exists`).
   - on manual path, keeps explicit dispatch override semantics.
 - Skip path is non-failure and records summary under job `release-skipped`.
+
+## Fork portability bootstrap (one-time)
+Use this once per skills-repo fork to set source project portability variables:
+
+```powershell
+pwsh -NoProfile -File ./scripts/Initialize-ForkPortability.ps1 `
+  -SkillsRepo '<owner>/labview-icon-editor-codex-skills' `
+  -SourceProjectRepo '<owner>/labview-icon-editor' `
+  -SourceProjectRef 'main'
+```
+
+Repository variable contract written by bootstrap:
+- `LVIE_SOURCE_PROJECT_REPO`
+- `LVIE_SOURCE_PROJECT_REF`
+- `LVIE_SOURCE_PROJECT_SHA` (strict pin; required by CI/release resolvers)
+- `LVIE_LABVIEW_PROFILE` (optional, default `lv2026`)
+- `LVIE_PARITY_ENFORCEMENT_PROFILE` (`auto|strict|container-only`, default `auto`)
+
+Deterministic SHA pin rotation:
+
+```powershell
+pwsh -NoProfile -File ./scripts/Initialize-ForkPortability.ps1 `
+  -SkillsRepo '<owner>/labview-icon-editor-codex-skills' `
+  -RefreshSourceSha
+```
 
 Installer contract:
 - Canonical NSIS root: `C:\Program Files (x86)\NSIS`
@@ -96,10 +124,14 @@ Installer contract:
   - `.lvversion` must be colocated with `lv_icon_editor.lvproj`.
 - Failure triage:
   - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
-- PPL source contract (CI Pipeline lane):
-  - source project repo: `svelderrainruiz/labview-icon-editor`
-  - source project ref: `patch/456-2020-migration-branch-from-9e46ecf`
-  - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
+- PPL/source target contract (CI Pipeline lane):
+  - resolution chain:
+    - workflow inputs `source_project_repo`, `source_project_ref`, `source_project_sha`
+    - repository variables `LVIE_SOURCE_PROJECT_REPO`, `LVIE_SOURCE_PROJECT_REF`, `LVIE_SOURCE_PROJECT_SHA`
+    - fallback for repo/ref: `<github.repository_owner>/labview-icon-editor`, `main`
+  - strict pin:
+    - `source_project_sha` / `LVIE_SOURCE_PROJECT_SHA` is required
+    - missing or malformed SHA fails in `resolve-source-target` before build lanes start
   - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
   - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
 - Native self-hosted packaging contract:

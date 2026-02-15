@@ -60,12 +60,15 @@ Describe 'Release state Phase 2 contract' {
         $script:orchestratorContent | Should -Match "method\s*=\s*'rest'"
     }
 
-    It 'uses current skills-repo defaults and required artifact prefixes across release-state scripts' {
+    It 'uses context-derived owner repo resolution and required artifact prefixes across release-state scripts' {
         foreach ($content in @($script:watcherContent, $script:orchestratorContent, $script:metricsContent)) {
-            $content | Should -Match "svelderrainruiz/labview-icon-editor-codex-skills"
+            $content | Should -Match 'Resolve-OwnerRepo'
+            $content | Should -Match 'GITHUB_REPOSITORY'
+            $content | Should -Match 'git remote get-url origin'
             $content | Should -Match 'docker-contract-ppl-bundle-windows-x64-'
             $content | Should -Match 'docker-contract-ppl-bundle-linux-x64-'
             $content | Should -Match 'docker-contract-vip-package-self-hosted-'
+            $content | Should -Not -Match "svelderrainruiz/labview-icon-editor-codex-skills"
             $content | Should -Not -Match 'lv_icon_x64\.lvlibp'
             $content | Should -Not -Match 'lv_icon_x86\.lvlibp'
             $content | Should -Not -Match 'conformance-full'

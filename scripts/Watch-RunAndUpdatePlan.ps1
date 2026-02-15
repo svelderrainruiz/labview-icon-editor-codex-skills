@@ -6,7 +6,7 @@ param(
   [string]$PlanPath,
 
   [Parameter(Mandatory = $false)]
-  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor-codex-skills',
+  [string]$OwnerRepo = '',
 
   [Parameter(Mandatory = $false)]
   [string]$StatePath,
@@ -17,9 +17,36 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Resolve-OwnerRepo {
+  param(
+    [Parameter(Mandatory = $false)]
+    [string]$Value
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Value)) {
+    return $Value.Trim()
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+    return [string]$env:GITHUB_REPOSITORY
+  }
+
+  try {
+    $originUrl = (git remote get-url origin).Trim()
+    if ($originUrl -match 'github\.com[:/](?<repo>[^/]+/[^/.]+?)(?:\.git)?$') {
+      return [string]$Matches.repo
+    }
+  } catch {
+  }
+
+  throw "OwnerRepo was not provided and could not be inferred. Pass -OwnerRepo <owner/repo>."
+}
+
 if (-not (Test-Path -Path $PlanPath -PathType Leaf)) {
   throw "Plan file not found: $PlanPath"
 }
+
+$OwnerRepo = Resolve-OwnerRepo -Value $OwnerRepo
 
 $runUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId"
 $jobsUrl = "https://api.github.com/repos/$OwnerRepo/actions/runs/$RunId/jobs?per_page=100"

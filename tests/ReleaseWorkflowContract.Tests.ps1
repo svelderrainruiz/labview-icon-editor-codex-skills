@@ -38,17 +38,33 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Not -Match 'parity-gate:'
     }
 
-    It 'keeps explicit source project pin inputs and compatibility inputs' {
+    It 'keeps explicit source project pin inputs, variable-ready dispatch defaults, and compatibility inputs' {
         $script:releaseContent | Should -Match 'release_tag:'
         $script:releaseContent | Should -Match 'consumer_repo:'
         $script:releaseContent | Should -Match 'consumer_ref:'
         $script:releaseContent | Should -Match 'consumer_sha:'
+        $script:releaseContent | Should -Match 'consumer_repo:\s*[\s\S]*?required:\s*false'
+        $script:releaseContent | Should -Match "consumer_repo:\s*[\s\S]*?default:\s*''"
+        $script:releaseContent | Should -Match 'consumer_ref:\s*[\s\S]*?required:\s*false'
+        $script:releaseContent | Should -Match "consumer_ref:\s*[\s\S]*?default:\s*''"
+        $script:releaseContent | Should -Match 'consumer_sha:\s*[\s\S]*?required:\s*false'
+        $script:releaseContent | Should -Match "consumer_sha:\s*[\s\S]*?default:\s*''"
         $script:releaseContent | Should -Match 'run_self_hosted:'
         $script:releaseContent | Should -Match 'run_build_spec:'
         $script:releaseContent | Should -Match '\(Deprecated\) retained for dispatch compatibility'
         $script:releaseContent | Should -Match 'labview_profile:'
         $script:releaseContent | Should -Match 'source_labview_version_override:'
         $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:'
+    }
+
+    It 'resolves source project target from inputs then repository variables with strict SHA requirement' {
+        $script:releaseContent | Should -Match 'VAR_SOURCE_PROJECT_REPO:\s*\$\{\{\s*vars\.LVIE_SOURCE_PROJECT_REPO'
+        $script:releaseContent | Should -Match 'VAR_SOURCE_PROJECT_REF:\s*\$\{\{\s*vars\.LVIE_SOURCE_PROJECT_REF'
+        $script:releaseContent | Should -Match 'VAR_SOURCE_PROJECT_SHA:\s*\$\{\{\s*vars\.LVIE_SOURCE_PROJECT_SHA'
+        $script:releaseContent | Should -Match 'VAR_LABVIEW_PROFILE:\s*\$\{\{\s*vars\.LVIE_LABVIEW_PROFILE'
+        $script:releaseContent | Should -Match '\{0\}/labview-icon-editor''\s*-f\s*\[string\]\$env:GITHUB_REPOSITORY_OWNER'
+        $script:releaseContent | Should -Match 'Strict pin is required; set workflow input ''consumer_sha'' or repository variable ''LVIE_SOURCE_PROJECT_SHA'''
+        $script:releaseContent | Should -Not -Match 'Get-CiDefaultValue'
     }
 
     It 'passes source project pin values into reusable CI gate via resolver outputs' {
@@ -99,7 +115,7 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'source_project_sha:'
     }
 
-    It 'exposes reusable ci.yml source project override inputs' {
+    It 'exposes reusable ci.yml source project override inputs and portability variable chain' {
         $script:ciContent | Should -Match 'workflow_call:'
         $script:ciContent | Should -Match 'source_project_repo:'
         $script:ciContent | Should -Match 'source_project_ref:'
@@ -107,6 +123,10 @@ Describe 'Release workflow contract' {
         $script:ciContent | Should -Match 'labview_profile:'
         $script:ciContent | Should -Match 'source_labview_version_override:'
         $script:ciContent | Should -Match 'run_lv2020_edge_smoke:'
+        $script:ciContent | Should -Match 'vars\.LVIE_SOURCE_PROJECT_REPO'
+        $script:ciContent | Should -Match 'vars\.LVIE_SOURCE_PROJECT_REF'
+        $script:ciContent | Should -Match 'vars\.LVIE_SOURCE_PROJECT_SHA'
+        $script:ciContent | Should -Match 'format\(''\{0\}/labview-icon-editor'',\s*github\.repository_owner\)'
     }
 }
 

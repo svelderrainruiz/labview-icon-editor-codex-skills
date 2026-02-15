@@ -9,9 +9,9 @@ param(
     [int]$TimeoutSeconds = 300,
 
     [string]$ConsumerPath = 'consumer',
-    [string]$ConsumerRepo = 'https://github.com/svelderrainruiz/labview-icon-editor.git',
-    [string]$ConsumerRef = 'patch/456-2020-migration-branch-from-9e46ecf',
-    [string]$ConsumerExpectedSha = '9e46ecf591bc36afca8ddf4ce688a5f58604a12a',
+    [string]$ConsumerRepo = '',
+    [string]$ConsumerRef = '',
+    [string]$ConsumerExpectedSha = '',
 
     [string]$OutputDirectory,
 
@@ -49,8 +49,106 @@ function Ensure-Directory {
     }
 }
 
+function Resolve-GitHubRepositoryId {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository
+    )
+
+    $trimmed = $Repository.Trim()
+    if ($trimmed -match '^(?<repo>[^/\s]+/[^/\s]+)$') {
+        return [string]$Matches.repo
+    }
+
+    if ($trimmed -match '^https://github\.com/(?<repo>[^/]+/[^/.]+?)(?:\.git)?/?$') {
+        return [string]$Matches.repo
+    }
+
+    throw "Consumer repository '$Repository' is invalid. Expected '<owner>/<repo>' or 'https://github.com/<owner>/<repo>.git'."
+}
+
+function Resolve-CloneUrl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository
+    )
+
+    $trimmed = $Repository.Trim()
+    if ($trimmed -match '^https://github\.com/[^/]+/[^/]+(?:\.git)?/?$') {
+        return $trimmed
+    }
+
+    $repoId = Resolve-GitHubRepositoryId -Repository $trimmed
+    return "https://github.com/$repoId.git"
+}
+
+function Resolve-DefaultSourceProjectRepo {
+    if (-not [string]::IsNullOrWhiteSpace($env:LVIE_SOURCE_PROJECT_REPO)) {
+        return [string]$env:LVIE_SOURCE_PROJECT_REPO
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+        $owner = ([string]$env:GITHUB_REPOSITORY -split '/', 2)[0]
+        if (-not [string]::IsNullOrWhiteSpace($owner)) {
+            return "$owner/labview-icon-editor"
+        }
+    }
+
+    return ''
+}
+
+function Resolve-SkillRepositoryId {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+        return [string]$env:GITHUB_REPOSITORY
+    }
+
+    try {
+        $originUrl = (git -C $RepositoryRoot remote get-url origin).Trim()
+        if ($originUrl -match 'github\.com[:/](?<repo>[^/]+/[^/.]+?)(?:\.git)?$') {
+            return [string]$Matches.repo
+        }
+    }
+    catch {
+    }
+
+    return 'unknown/unknown'
+}
+
 $repoRoot = Resolve-FullPath -Path (Join-Path $PSScriptRoot '..')
 $resolvedConsumerPath = Resolve-FullPath -Path $ConsumerPath
+
+if ([string]::IsNullOrWhiteSpace($ConsumerRepo)) {
+    $ConsumerRepo = Resolve-DefaultSourceProjectRepo
+}
+if ([string]::IsNullOrWhiteSpace($ConsumerRepo)) {
+    throw "ConsumerRepo is required. Provide -ConsumerRepo or set LVIE_SOURCE_PROJECT_REPO."
+}
+$consumerRepositoryId = Resolve-GitHubRepositoryId -Repository $ConsumerRepo
+$consumerCloneUrl = Resolve-CloneUrl -Repository $ConsumerRepo
+
+if ([string]::IsNullOrWhiteSpace($ConsumerRef)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:LVIE_SOURCE_PROJECT_REF)) {
+        $ConsumerRef = [string]$env:LVIE_SOURCE_PROJECT_REF
+    } else {
+        $ConsumerRef = 'main'
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($ConsumerExpectedSha)) {
+    $ConsumerExpectedSha = [string]$env:LVIE_SOURCE_PROJECT_SHA
+}
+if ([string]::IsNullOrWhiteSpace($ConsumerExpectedSha)) {
+    throw "ConsumerExpectedSha is required. Strict source pin is mandatory; provide -ConsumerExpectedSha or set LVIE_SOURCE_PROJECT_SHA."
+}
+$ConsumerExpectedSha = $ConsumerExpectedSha.Trim().ToLowerInvariant()
+if ($ConsumerExpectedSha -notmatch '^[0-9a-f]{40}$') {
+    throw "ConsumerExpectedSha '$ConsumerExpectedSha' is invalid. Expected 40-char lowercase hex."
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
@@ -71,7 +169,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $resolvedConsumerPath '.git') -PathT
     if ((Test-Path -LiteralPath $resolvedConsumerPath -PathType Container) -and (Get-ChildItem -LiteralPath $resolvedConsumerPath -Force | Measure-Object).Count -gt 0) {
         throw "Consumer path exists and is not empty git repository: $resolvedConsumerPath"
     }
-    git clone $ConsumerRepo $resolvedConsumerPath
+    git clone $consumerCloneUrl $resolvedConsumerPath
 }
 
 git -C $resolvedConsumerPath fetch origin $ConsumerRef
@@ -98,6 +196,11 @@ if (-not (Test-Path -LiteralPath $versionHelperPath -PathType Leaf)) {
 $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $resolvedConsumerPath
 
 $releaseNotes = Get-Content -LiteralPath $releaseNotesPath -Raw
+$skillRepositoryId = Resolve-SkillRepositoryId -RepositoryRoot $repoRoot
+$skillOwner = ($skillRepositoryId -split '/', 2)[0]
+if ([string]::IsNullOrWhiteSpace($skillOwner)) {
+    $skillOwner = 'unknown'
+}
 $displayInfo = @{
     "Package Version" = @{
         "major" = $VersionMajor
@@ -106,10 +209,10 @@ $displayInfo = @{
         "build" = $VersionBuild
     }
     "Product Name" = "labview-icon-editor"
-    "Company Name" = "svelderrainruiz"
-    "Author Name (Person or Company)" = "svelderrainruiz/labview-icon-editor-codex-skills"
-    "Product Homepage (URL)" = "https://github.com/svelderrainruiz/labview-icon-editor-codex-skills"
-    "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) svelderrainruiz"
+    "Company Name" = $skillOwner
+    "Author Name (Person or Company)" = $skillRepositoryId
+    "Product Homepage (URL)" = "https://github.com/$skillRepositoryId"
+    "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) $skillOwner"
     "Product Description Summary" = "labview-icon-editor VI Package diagnostics exercise."
     "Product Description" = "labview-icon-editor VI Package diagnostics exercise."
     "Release Notes - Change Log" = $releaseNotes
@@ -145,7 +248,7 @@ if command -v timeout >/dev/null 2>&1; then
     -Build $VersionBuild \
     -Commit '${VersionCommit}' \
     -OutputDirectory '${containerOutputDirectory}' \
-    -SourceRepository 'svelderrainruiz/labview-icon-editor' \
+    -SourceRepository '${consumerRepositoryId}' \
     -SourceRef '${ConsumerRef}' \
     -SourceSha '${actualConsumerSha}' \
     -BuildRunId 'local' \
@@ -166,7 +269,7 @@ else
     -Build $VersionBuild \
     -Commit '${VersionCommit}' \
     -OutputDirectory '${containerOutputDirectory}' \
-    -SourceRepository 'svelderrainruiz/labview-icon-editor' \
+    -SourceRepository '${consumerRepositoryId}' \
     -SourceRef '${ConsumerRef}' \
     -SourceSha '${actualConsumerSha}' \
     -BuildRunId 'local' \

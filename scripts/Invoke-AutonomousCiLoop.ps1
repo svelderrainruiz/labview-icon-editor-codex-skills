@@ -47,7 +47,10 @@ param(
 
   [Parameter(Mandatory = $false)]
   [ValidateSet('auto', 'runner-cli', 'gh')]
-  [string]$RunQueryBackend = 'auto'
+  [string]$RunQueryBackend = 'auto',
+
+  [Parameter(Mandatory = $false)]
+  [string]$OwnerRepo = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,6 +87,31 @@ function Test-RunnerCliAvailability {
     exit_code = $probe.ExitCode
     output = @($probe.Output)
   }
+}
+
+function Resolve-OwnerRepo {
+  param(
+    [Parameter(Mandatory = $false)]
+    [string]$Value
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Value)) {
+    return $Value.Trim()
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+    return [string]$env:GITHUB_REPOSITORY
+  }
+
+  try {
+    $originUrl = (git remote get-url origin).Trim()
+    if ($originUrl -match 'github\.com[:/](?<repo>[^/]+/[^/.]+?)(?:\.git)?$') {
+      return [string]$Matches.repo
+    }
+  } catch {
+  }
+
+  throw "OwnerRepo was not provided and could not be inferred. Pass -OwnerRepo <owner/repo>."
 }
 
 function Invoke-WorkflowDispatch {
@@ -402,6 +430,7 @@ function Resolve-DispatchedRunMeta {
 
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -Path $repoRoot
+$OwnerRepo = Resolve-OwnerRepo -Value $OwnerRepo
 
 if ([string]::IsNullOrWhiteSpace($Branch)) {
   $branchProbe = Invoke-External -FilePath 'git' -Arguments @('branch', '--show-current')
@@ -559,7 +588,7 @@ while ($true) {
   $record.workflow_run.head_sha_actual = [string]$resolvedRunMeta.head_sha
 
   while ($true) {
-    $runApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/$runId")
+    $runApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/$OwnerRepo/actions/runs/$runId")
     if ($runApi.ExitCode -ne 0) {
       Start-Sleep -Seconds $PollSeconds
       continue
@@ -570,7 +599,7 @@ while ($true) {
     $record.workflow_run.conclusion = [string]$run.conclusion
 
     if ($run.status -eq 'completed') {
-      $jobsApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/$runId/jobs")
+      $jobsApi = Invoke-External -FilePath 'gh' -Arguments @('api', "repos/$OwnerRepo/actions/runs/$runId/jobs")
       if ($jobsApi.ExitCode -eq 0) {
         $jobs = (($jobsApi.Output -join "`n") | ConvertFrom-Json)
         $record.workflow_run.failed_jobs = @(

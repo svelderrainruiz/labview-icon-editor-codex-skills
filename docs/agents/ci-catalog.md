@@ -10,6 +10,7 @@ Provide a fast map of deterministic CI/release jobs and artifacts for GO/NO-GO a
 | Job | Role | Release impact |
 | --- | --- | --- |
 | `docker-ci` | contract suite and deterministic Docker test baseline | required |
+| `resolve-source-target` | resolves source repo/ref/sha via input -> vars -> fallback and enforces strict SHA pin | required |
 | `run-lunit-smoke-x64` | required native smoke gate (effective target year resolver-driven) | required |
 | `build-x64-ppl-windows` | Windows x64 PPL artifact lane | required |
 | `build-x64-ppl-linux` | Linux x64 PPL artifact lane | required |
@@ -48,4 +49,10 @@ Provide a fast map of deterministic CI/release jobs and artifacts for GO/NO-GO a
 3. For release automation runs, inspect `resolve-release-context`:
    - `should_release=true` => publish path expected.
    - `should_release=false` + `skip_reason=tag_exists` => deterministic skip path expected.
-4. Use `docs/agents/release-gates.md` to decide GO/NO-GO.
+4. Confirm portability variables are set in forked repos:
+   - `LVIE_SOURCE_PROJECT_REPO`
+   - `LVIE_SOURCE_PROJECT_REF`
+   - `LVIE_SOURCE_PROJECT_SHA`
+   - `LVIE_LABVIEW_PROFILE` (optional)
+   - `LVIE_PARITY_ENFORCEMENT_PROFILE` (optional)
+5. Use `docs/agents/release-gates.md` to decide GO/NO-GO.
