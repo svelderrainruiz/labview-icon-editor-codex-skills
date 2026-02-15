@@ -45,6 +45,10 @@ A release candidate run is GO-eligible only if all are true:
 
 If any condition fails: NO-GO (no release publish).
 
+Non-gating diagnostic lanes in `ci.yml` (advisory, not GO/NO-GO blockers):
+- `validate-pylavi-docker-source-project` (artifact `docker-contract-pylavi-source-project-<run_id>`)
+- `build-runner-cli-linux-docker` (artifact `docker-contract-runner-cli-linux-x64-<run_id>`)
+
 ## 4) Dispatch source of truth
 Use skills repo release workflow inputs in `.github/workflows/release-skill-layer.yml`:
 - `release_tag`

@@ -72,7 +72,7 @@ env:
   BITNESS: '64'
 
 jobs:
-  contract-tests:
+  docker-ci:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -98,12 +98,210 @@ jobs:
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
+  validate-pylavi-docker-source-project:
+    runs-on: ubuntu-latest
+    needs: [docker-ci]
+    continue-on-error: true
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Run deterministic pylavi Docker validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'pylavi-docker-source-project'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PylaviDockerValidation.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -OutputDirectory $outputDirectory
+
+      - name: Publish pylavi Docker validation summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'pylavi-docker-source-project'
+          $statusPath = Join-Path $outputDirectory 'pylavi-docker.status.json'
+          $resultPath = Join-Path $outputDirectory 'pylavi-docker.result.json'
+          $artifactName = "docker-contract-pylavi-source-project-$env:GITHUB_RUN_ID"
+
+          $status = 'unknown'
+          $reason = ''
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          $exitCode = ''
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($null -ne $resultPayload.vi_validate_exit_code) {
+                $exitCode = [string]$resultPayload.vi_validate_exit_code
+              }
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          @(
+            '## pylavi Docker Source Project Validation'
+            ''
+            ("- Status: {0}" -f $status)
+            ("- vi_validate exit code: {0}" -f (if ([string]::IsNullOrWhiteSpace($exitCode)) { 'n/a' } else { $exitCode }))
+            ("- Reason: {0}" -f (if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }))
+            ("- Diagnostics artifact: {0}" -f $artifactName)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload pylavi Docker validation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-pylavi-source-project-${{ github.run_id }}
+          path: ${{ runner.temp }}/pylavi-docker-source-project
+          if-no-files-found: error
+
+  build-runner-cli-linux-docker:
+    runs-on: ubuntu-latest
+    needs: [docker-ci]
+    continue-on-error: true
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Build runner-cli in deterministic Linux Docker lane
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'runner-cli-linux-docker'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-RunnerCliLinuxDocker.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -OutputDirectory $outputDirectory `
+            -Runtime 'linux-x64'
+
+      - name: Publish runner-cli Linux Docker summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'runner-cli-linux-docker'
+          $statusPath = Join-Path $outputDirectory 'runner-cli-linux-docker.status.json'
+          $resultPath = Join-Path $outputDirectory 'runner-cli-linux-docker.result.json'
+          $artifactName = "docker-contract-runner-cli-linux-x64-$env:GITHUB_RUN_ID"
+
+          $status = 'unknown'
+          $reason = ''
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          $runExit = ''
+          $publishPath = ''
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($null -ne $resultPayload.docker_run_exit_code) {
+                $runExit = [string]$resultPayload.docker_run_exit_code
+              }
+              if ($null -ne $resultPayload.publish_binary_path) {
+                $publishPath = [string]$resultPayload.publish_binary_path
+              }
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          @(
+            '## runner-cli Linux Docker Lane'
+            ''
+            ("- Status: {0}" -f $status)
+            ("- Docker run exit code: {0}" -f (if ([string]::IsNullOrWhiteSpace($runExit)) { 'n/a' } else { $runExit }))
+            ("- Published binary path: {0}" -f (if ([string]::IsNullOrWhiteSpace($publishPath)) { 'n/a' } else { $publishPath }))
+            ("- Reason: {0}" -f (if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }))
+            ("- Diagnostics artifact: {0}" -f $artifactName)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload runner-cli Linux Docker artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-runner-cli-linux-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/runner-cli-linux-docker
+          if-no-files-found: error
+
   run-lunit-smoke-lv2020x64:
     runs-on:
       - self-hosted
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
-    needs: [contract-tests, resolve-labview-profile]
+    needs: [docker-ci, resolve-labview-profile]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -320,7 +518,7 @@ jobs:
       - self-hosted
       - windows
       - self-hosted-windows-lv2020x64
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -387,7 +585,7 @@ jobs:
 
   build-x64-ppl-windows:
     runs-on: windows-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -557,7 +755,7 @@ jobs:
 
   build-x64-ppl-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, build-x64-ppl-windows]
+    needs: [docker-ci, build-x64-ppl-windows]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -728,7 +926,7 @@ jobs:
 
   gather-release-notes:
     runs-on: ubuntu-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -787,7 +985,7 @@ jobs:
 
   resolve-labview-profile:
     runs-on: ubuntu-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     outputs:
       source_labview_year: ${{ steps.source-labels.outputs.source_labview_year }}
       source_runner_label_x86: ${{ steps.source-labels.outputs.source_runner_label_x86 }}
@@ -971,7 +1169,7 @@ jobs:
 
   prepare-vipb-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, gather-release-notes, resolve-labview-profile]
+    needs: [docker-ci, gather-release-notes, resolve-labview-profile]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -1835,5 +2033,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "Self-hosted CI final gate passed."
+
 
 

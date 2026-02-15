@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "package": {
+    "name": "pylavi",
+    "version": "0.3.2",
+    "url": "https://files.pythonhosted.org/packages/source/p/pylavi/pylavi-0.3.2.tar.gz",
+    "sha256": "49165a197f7a1dd234294e12156bbb0db143da5b60b5ae4c2dd4b25ade6f40b4"
+  }
+}

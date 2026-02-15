@@ -20,6 +20,10 @@ From skills repo CI run metadata:
 - docker-contract-vip-package-self-hosted-<run_id>
 - codex-skill-layer
 
+## Advisory artifacts (non-gating)
+- docker-contract-pylavi-source-project-<run_id> (diagnostic source-project pylavi validation)
+- docker-contract-runner-cli-linux-x64-<run_id> (diagnostic runner-cli Linux Docker build/test/publish)
+
 ## Release payload contract
 Release publish must include these files:
 - lvie-codex-skill-layer-installer.exe
