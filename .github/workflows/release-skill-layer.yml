@@ -239,9 +239,14 @@ jobs:
           $tagExists = $false
           $escapedTag = [System.Uri]::EscapeDataString($releaseTag)
           & gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$escapedTag" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $tagProbeExitCode = $LASTEXITCODE
+          if ($tagProbeExitCode -eq 0) {
             $tagExists = $true
+          } elseif ($tagProbeExitCode -ne 1) {
+            throw "Unable to probe release tag '$releaseTag'. gh api exited with code $tagProbeExitCode."
           }
+          # Do not leak probe status as step exit code; resolver logic decides pass/fail.
+          $global:LASTEXITCODE = 0
 
           $shouldRelease = 'true'
           $skipReason = ''
