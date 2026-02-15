@@ -1,6 +1,6 @@
 # Agent Quickstart (labview-icon-editor)
 
-Last validated: 2026-02-14
+Last validated: 2026-02-15
 Validation evidence: skills repo CI-coupled release gate
 
 ## Purpose
@@ -63,6 +63,17 @@ Compatibility-only (deprecated) inputs:
 - `run_self_hosted`
 - `run_build_spec`
 
+## 4.1) Deterministic post-merge auto-release
+- `release-skill-layer` runs automatically on `push` to `main`.
+- Auto-release resolver derives:
+  - `release_tag` as `v<manifest.version>`.
+  - `consumer_repo`, `consumer_ref`, `consumer_sha`, and `labview_profile` from `.github/workflows/ci.yml` defaults.
+- If the resolved tag already exists, workflow follows deterministic skip path:
+  - `should_release=false`
+  - `skip_reason=tag_exists`
+  - `release-skipped` job succeeds and publishes skip summary.
+- `workflow_dispatch` remains available for explicit overrides and reruns with operator-provided inputs.
+
 ## 5) Provenance fields expected in release notes
 - `skills_ci_repo`
 - `skills_ci_run_url`
@@ -82,7 +93,7 @@ Compatibility-only (deprecated) inputs:
 ```powershell
 gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
 ```
-- `run-lunit-smoke-lv2020x64` uses resolved source-year x64 label from `resolve-labview-profile` output (`self-hosted-windows-lv<YYYY>x64`).
+- `run-lunit-smoke-x64` uses resolved source-year x64 label from `resolve-labview-profile` output (`self-hosted-windows-lv<YYYY>x64`).
 - Self-hosted jobs enforce source-project remote hygiene via `Assert-SourceProjectRemotes.ps1`:
   - sets/updates `upstream` to `https://github.com/<source-project-repo>.git`
   - validates non-interactive `git ls-remote upstream`
@@ -94,7 +105,7 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
   - `Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
   - g-cli is limited to LUnit smoke only.
 - Source-year override behavior:
-  - the job keeps key `run-lunit-smoke-lv2020x64` for compatibility,
+  - required job key is `run-lunit-smoke-x64`,
   - execution target year and `.lvversion` are resolved from effective target selection in `resolve-labview-profile`,
   - when provided, `source_labview_version_override` is authoritative for CI execution target (format `major.minor`; Minimum supported LabVIEW version is 20.0),
   - when override is omitted, source project `.lvversion` is used.
@@ -104,7 +115,7 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - On LV2020 smoke failure, CI may run a diagnostic-only LV2026 x64 control probe (for comparable outcomes like `no_testcases` / `failed_testcases`) and writes comparative results into `lunit-smoke.result.json` and the job summary.
 - CI invokes `Invoke-LunitSmokeLv2020.ps1` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before LV2020 run and before any LV2026 control probe.
 - If process isolation cannot clear active LabVIEW instances, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
-- Required lane is strict: `run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses`.
+- Required lane is strict: `run-lunit-smoke-x64` does not use `-AllowNoTestcasesWhenControlProbePasses`.
 - `-AllowNoTestcasesWhenControlProbePasses` is limited to optional `run-lunit-smoke-lv2020x64-edge`.
 - All other LV2020 smoke failures remain blocking for downstream self-hosted jobs.
 - Triage order for LV2020 smoke:
@@ -112,6 +123,18 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
   2. `reports/lunit-report-lv<effective_year>-x64.xml`
   3. `reports/lunit-report-lv2026-x64-control.xml` (if present)
   4. `lunit-smoke.log`
+
+## 6.2) Runner PowerShell policy baseline
+- Required baseline for Windows/self-hosted runners:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+```
+- Verify policy matrix:
+```powershell
+Get-ExecutionPolicy -List
+```
+- CI enforces this with `scripts/Initialize-RunnerPowerShellPolicy.ps1` and `scripts/Unblock-WorkspaceScripts.ps1`.
+- Do not use `-ExecutionPolicy Bypass` in repo-owned commands, workflow snippets, or local runbooks.
 
 ## 7) Canonical references
 - `.github/workflows/ci.yml`

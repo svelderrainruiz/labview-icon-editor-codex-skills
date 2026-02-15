@@ -303,7 +303,7 @@ jobs:
           path: ${{ runner.temp }}/runner-cli-linux-docker
           if-no-files-found: error
 
-  run-lunit-smoke-lv2020x64:
+  run-lunit-smoke-x64:
     runs-on:
       - self-hosted
       - windows
@@ -1530,7 +1530,7 @@ jobs:
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
-    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020x64, resolve-labview-profile]
+    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-x64, resolve-labview-profile]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'

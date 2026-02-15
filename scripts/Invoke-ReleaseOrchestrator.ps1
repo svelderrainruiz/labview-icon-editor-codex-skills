@@ -6,7 +6,7 @@ param(
   [string]$PlanPath,
 
   [Parameter(Mandatory = $false)]
-  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor',
+  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor-codex-skills',
 
   [Parameter(Mandatory = $false)]
   [string]$SkillRepo,
@@ -348,15 +348,26 @@ if (-not (Test-Path -Path $watcherPath -PathType Leaf)) {
 
 $snapshot = Get-RunSnapshot -Repo $OwnerRepo -Id $RunId
 $requiredArtifacts = @(
-  'lv_icon_x64.lvlibp',
-  'lv_icon_x86.lvlibp',
-  'conformance-full',
-  'core-conformance-linux-evidence',
-  'core-conformance-windows-evidence'
+  'docker-contract-ppl-bundle-windows-x64-',
+  'docker-contract-ppl-bundle-linux-x64-',
+  'docker-contract-vip-package-self-hosted-'
 )
 
 $artifactNames = @($snapshot.artifacts.artifacts | ForEach-Object { $_.name })
-$missingArtifacts = @($requiredArtifacts | Where-Object { $_ -notin $artifactNames })
+$missingArtifacts = @()
+foreach ($requiredArtifactPrefix in $requiredArtifacts) {
+  $matchFound = $false
+  foreach ($artifactName in $artifactNames) {
+    if ($artifactName.StartsWith($requiredArtifactPrefix, [System.StringComparison]::Ordinal)) {
+      $matchFound = $true
+      break
+    }
+  }
+
+  if (-not $matchFound) {
+    $missingArtifacts += $requiredArtifactPrefix
+  }
+}
 $badJobs = @($snapshot.jobs.jobs | Where-Object {
     $_.conclusion -in @('failure', 'cancelled', 'timed_out', 'startup_failure', 'action_required')
   })

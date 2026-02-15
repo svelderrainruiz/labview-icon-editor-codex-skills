@@ -1,61 +1,51 @@
 # CI Catalog (Agent-Oriented)
 
-Last validated: 2026-02-13
-Validation evidence: runs 22002791381, 22004004032, 22005219153
+Last validated: 2026-02-15
+Validation evidence: `CI Pipeline` + `release-skill-layer` contracts in this repository
 
 ## Purpose
-Provide a quick map of high-value CI jobs in labview-icon-editor so agents can triage quickly.
+Provide a fast map of deterministic CI/release jobs and artifacts for GO/NO-GO and release triage.
 
-## Current observed jobs
+## Primary CI jobs (skills repo)
 | Job | Role | Release impact |
 | --- | --- | --- |
-| Run Metadata | baseline run metadata | informational |
-| PowerShell Lint | script hygiene | blocking if failed |
-| VIP Prerelease Requirements Lint | prerelease policy checks | blocking if failed |
-| Pre-Release Context | release preflight context | blocking if failed |
-| Build runner-cli (win-x64) / publish | tool artifact build | blocking if failed |
-| Build runner-cli (linux-x64) / publish | tool artifact build | blocking if failed |
-| Resolve Codex Skill Layer Asset | skill-layer linkage | blocking if failed |
-| LabVIEW Version Gate | version contract check | blocking if failed |
-| Validate LabVIEW Files (pylavi, report-only) | static validation evidence | blocking if failed |
-| Core Conformance Evidence (Hosted Windows) | conformance evidence | required evidence |
-| Core Conformance Evidence (Hosted Linux) | conformance evidence | required evidence |
-| Compute Version | version derivation | blocking if failed |
-| Build Windows Container Packed Library | produce lv_icon_x86.lvlibp lane | required for gate |
-| Build Linux Container Packed Library | produce lv_icon_x64.lvlibp lane | required for gate |
-| Conformance Check (Full, Strict) | full conformance artifact | required for gate |
-| Detect VIPC changes | dependency drift signal | conditional blocker |
-| Apply VIPC (LV x64) | environment prep | may block downstream tests |
-| Apply VIPC (LV x86) | environment prep | may block downstream tests |
-| Test Source Using LV 64-bit | runtime validation | release confidence gate |
-| Build 64-bit Packed Library | packed library build lane (new naming) | required for gate |
-| Build 32-bit Packed Library | packed library build lane (new naming) | required for gate |
+| `docker-ci` | contract suite and deterministic Docker test baseline | required |
+| `run-lunit-smoke-x64` | required native smoke gate (effective target year resolver-driven) | required |
+| `build-x64-ppl-windows` | Windows x64 PPL artifact lane | required |
+| `build-x64-ppl-linux` | Linux x64 PPL artifact lane | required |
+| `prepare-vipb-linux` | authoritative VIPB diagnostics/prep lane | required |
+| `build-vip-self-hosted` | self-hosted package build lane | required |
+| `install-vip-x86-self-hosted` | post-package VIPM install/uninstall smoke lane | required |
+| `ci-self-hosted-final-gate` | final required branch-protection gate | required |
+| `validate-pylavi-docker-source-project` | deterministic pylavi static validation lane | advisory (non-gating) |
+| `build-runner-cli-linux-docker` | deterministic runner-cli linux-x64 container lane | advisory (non-gating) |
 
-## Known critical failures to prioritize
-- Build VI Package
-- Pipeline Contract
+## Required CI artifacts for release GO/NO-GO
+- `docker-contract-ppl-bundle-windows-x64-<run_id>`
+- `docker-contract-ppl-bundle-linux-x64-<run_id>`
+- `docker-contract-vip-package-self-hosted-<run_id>`
 
-When either fails, treat run as NO-GO for release dispatch.
+## Release workflow map
+| Job | Role |
+| --- | --- |
+| `resolve-release-context` | resolves release tag + source pins + auto-release decision |
+| `ci-gate` | reusable `ci.yml` release gate |
+| `package` | NSIS installer packaging |
+| `publish-release-assets` | release asset staging + publish |
+| `release-skipped` | deterministic non-failure skip path (`tag_exists`) |
 
-## Recent failure evidence
-- Run 22002791381: Build VI Package + Pipeline Contract failed.
-- Run 22004004032: Build VI Package + Pipeline Contract failed.
-- Run 22005219153: currently in_progress; failures not observed yet.
-
-## Artifact-to-job mental map
-- lv_icon_x64.lvlibp: expected from Linux container packed library lane.
-- lv_icon_x86.lvlibp: expected from Windows container packed library lane.
-- conformance-full: expected from strict conformance lane.
-- core-conformance-linux-evidence: expected from hosted Linux evidence lane.
-- core-conformance-windows-evidence: expected from hosted Windows evidence lane.
+## Release payload files
+- `lvie-codex-skill-layer-installer.exe`
+- `lvie-ppl-bundle-windows-x64.zip`
+- `lvie-ppl-bundle-linux-x64.zip`
+- `lvie-vip-package-self-hosted.zip`
+- `release-provenance.json`
+- `release-payload-manifest.json`
 
 ## Fast triage recipe
-1. Check run status/conclusion.
-2. Check failed/cancelled/timed_out jobs.
-3. Check required artifact presence.
-4. Decide GO/NO-GO via release-gates contract.
-
-## Notes
-This catalog should be refreshed when the consumer workflow job list changes.
-Current branch under active monitoring: reconcile/issue-91-forward-port-456.
-Latest observed naming includes both legacy container lane names and newer 32/64-bit packed-library lane names.
+1. Confirm `ci-self-hosted-final-gate` is green on the target SHA.
+2. Confirm required CI artifacts are present.
+3. For release automation runs, inspect `resolve-release-context`:
+   - `should_release=true` => publish path expected.
+   - `should_release=false` + `skip_reason=tag_exists` => deterministic skip path expected.
+4. Use `docs/agents/release-gates.md` to decide GO/NO-GO.

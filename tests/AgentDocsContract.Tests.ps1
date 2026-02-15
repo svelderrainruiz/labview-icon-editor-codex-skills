@@ -61,6 +61,7 @@ Describe 'Agent docs contract' {
         $content = [string]$script:docs['release-gates.md']
         $content | Should -Match '(?m)^## Gate algorithm\s*$'
         $content | Should -Match '(?m)^## Dispatch policy\s*$'
+        $content | Should -Match '(?m)^## Auto-release policy\s*$'
         $content | Should -Match '(?m)^## Auth boundary policy\s*$'
         $content | Should -Match '(?m)^## Provenance policy\s*$'
     }
@@ -83,7 +84,7 @@ Describe 'Agent docs contract' {
         $quickstart | Should -Match 'diagnostic-only LV2026 x64 control probe'
         $quickstart | Should -Match '-EnforceLabVIEWProcessIsolation'
         $quickstart | Should -Match 'skipped_unable_to_clear_active_labview_processes'
-        $quickstart | Should -Match 'run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses'
+        $quickstart | Should -Match 'run-lunit-smoke-x64` does not use `-AllowNoTestcasesWhenControlProbePasses'
         $quickstart | Should -Match 'run-lunit-smoke-lv2020x64-edge'
         $quickstart | Should -Match 'source_labview_version_override'
         $quickstart | Should -Match 'run_lv2020_edge_smoke'
@@ -110,6 +111,42 @@ Describe 'Agent docs contract' {
         $releaseGates | Should -Match 'Advisory artifacts \(non-gating\)'
         $releaseGates | Should -Match 'docker-contract-pylavi-source-project-<run_id>'
         $releaseGates | Should -Match 'docker-contract-runner-cli-linux-x64-<run_id>'
+        $releaseGates | Should -Match 'validate-pylavi-docker-source-project'
+        $releaseGates | Should -Match 'docker-contract-pylavi-source-project-<run_id>'
+        $quickstart | Should -Match 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force'
+        $quickstart | Should -Match 'Get-ExecutionPolicy -List'
+        $quickstart | Should -Match 'Do not use `-ExecutionPolicy Bypass`'
+        $releaseGates | Should -Match 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force'
+        $releaseGates | Should -Match 'Get-ExecutionPolicy -List'
+        $releaseGates | Should -Match '-ExecutionPolicy Bypass'
+    }
+
+    It 'documents deterministic post-merge auto-release behavior and version-gated skip semantics' {
+        $readme = [string](Get-Content -Raw -Path (Join-Path $script:repoRoot 'README.md'))
+        $quickstart = [string]$script:docs['quickstart.md']
+        $releaseGates = [string]$script:docs['release-gates.md']
+        $ciCatalog = [string]$script:docs['ci-catalog.md']
+
+        $readme | Should -Match 'Post-merge release automation'
+        $readme | Should -Match 'to `main`'
+        $readme | Should -Match 'v<manifest\.version>'
+        $readme | Should -Match 'tag_exists'
+
+        $quickstart | Should -Match 'auto-release'
+        $quickstart | Should -Match 'to `main`'
+        $quickstart | Should -Match 'tag_exists'
+        $quickstart | Should -Match 'workflow_dispatch'
+
+        $releaseGates | Should -Match 'source of truth defaults from `ci\.yml`'
+        $releaseGates | Should -Match 'tag_exists'
+        $releaseGates | Should -Match 'manual dispatch'
+
+        $ciCatalog | Should -Match 'docker-contract-ppl-bundle-windows-x64-<run_id>'
+        $ciCatalog | Should -Match 'docker-contract-ppl-bundle-linux-x64-<run_id>'
+        $ciCatalog | Should -Match 'docker-contract-vip-package-self-hosted-<run_id>'
+        $ciCatalog | Should -Not -Match 'lv_icon_x64\.lvlibp'
+        $ciCatalog | Should -Not -Match 'lv_icon_x86\.lvlibp'
+        $ciCatalog | Should -Not -Match 'conformance-full'
     }
 }
 
