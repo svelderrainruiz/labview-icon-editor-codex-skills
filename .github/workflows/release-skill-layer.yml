@@ -221,9 +221,9 @@ jobs:
           Compress-Archive -Path (Join-Path $vipPackageDir '*') -DestinationPath $vipZipPath
 
           $assetFiles = @(
-            Get-Item -LiteralPath $stagedInstallerPath,
-            Get-Item -LiteralPath $windowsZipPath,
-            Get-Item -LiteralPath $linuxZipPath,
+            Get-Item -LiteralPath $stagedInstallerPath
+            Get-Item -LiteralPath $windowsZipPath
+            Get-Item -LiteralPath $linuxZipPath
             Get-Item -LiteralPath $vipZipPath
           )
 

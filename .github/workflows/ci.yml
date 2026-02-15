@@ -72,7 +72,7 @@ env:
   BITNESS: '64'
 
 jobs:
-  contract-tests:
+  docker-ci:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -98,12 +98,217 @@ jobs:
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
+  validate-pylavi-docker-source-project:
+    runs-on: ubuntu-latest
+    needs: [docker-ci]
+    continue-on-error: true
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Run deterministic pylavi Docker validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'pylavi-docker-source-project'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PylaviDockerValidation.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -OutputDirectory $outputDirectory
+
+      - name: Publish pylavi Docker validation summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'pylavi-docker-source-project'
+          $statusPath = Join-Path $outputDirectory 'pylavi-docker.status.json'
+          $resultPath = Join-Path $outputDirectory 'pylavi-docker.result.json'
+          $artifactName = "docker-contract-pylavi-source-project-$env:GITHUB_RUN_ID"
+
+          $status = 'unknown'
+          $reason = ''
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          $exitCode = ''
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($null -ne $resultPayload.vi_validate_exit_code) {
+                $exitCode = [string]$resultPayload.vi_validate_exit_code
+              }
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          $exitCodeDisplay = if ([string]::IsNullOrWhiteSpace($exitCode)) { 'n/a' } else { $exitCode }
+          $reasonDisplay = if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }
+
+          @(
+            '## pylavi Docker Source Project Validation'
+            ''
+            ("- Status: {0}" -f $status)
+            ("- vi_validate exit code: {0}" -f $exitCodeDisplay)
+            ("- Reason: {0}" -f $reasonDisplay)
+            ("- Diagnostics artifact: {0}" -f $artifactName)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload pylavi Docker validation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-pylavi-source-project-${{ github.run_id }}
+          path: ${{ runner.temp }}/pylavi-docker-source-project
+          if-no-files-found: error
+
+  build-runner-cli-linux-docker:
+    runs-on: ubuntu-latest
+    needs: [docker-ci]
+    continue-on-error: true
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Build runner-cli in deterministic Linux Docker lane
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'runner-cli-linux-docker'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-RunnerCliLinuxDocker.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -OutputDirectory $outputDirectory `
+            -Runtime 'linux-x64'
+
+      - name: Publish runner-cli Linux Docker summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'runner-cli-linux-docker'
+          $statusPath = Join-Path $outputDirectory 'runner-cli-linux-docker.status.json'
+          $resultPath = Join-Path $outputDirectory 'runner-cli-linux-docker.result.json'
+          $artifactName = "docker-contract-runner-cli-linux-x64-$env:GITHUB_RUN_ID"
+
+          $status = 'unknown'
+          $reason = ''
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          $runExit = ''
+          $publishPath = ''
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($null -ne $resultPayload.docker_run_exit_code) {
+                $runExit = [string]$resultPayload.docker_run_exit_code
+              }
+              if ($null -ne $resultPayload.publish_binary_path) {
+                $publishPath = [string]$resultPayload.publish_binary_path
+              }
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          $runExitDisplay = if ([string]::IsNullOrWhiteSpace($runExit)) { 'n/a' } else { $runExit }
+          $publishPathDisplay = if ([string]::IsNullOrWhiteSpace($publishPath)) { 'n/a' } else { $publishPath }
+          $reasonDisplay = if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }
+
+          @(
+            '## runner-cli Linux Docker Lane'
+            ''
+            ("- Status: {0}" -f $status)
+            ("- Docker run exit code: {0}" -f $runExitDisplay)
+            ("- Published binary path: {0}" -f $publishPathDisplay)
+            ("- Reason: {0}" -f $reasonDisplay)
+            ("- Diagnostics artifact: {0}" -f $artifactName)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload runner-cli Linux Docker artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-runner-cli-linux-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/runner-cli-linux-docker
+          if-no-files-found: error
+
   run-lunit-smoke-lv2020x64:
     runs-on:
       - self-hosted
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
-    needs: [contract-tests, resolve-labview-profile]
+    needs: [docker-ci, resolve-labview-profile]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -320,7 +525,7 @@ jobs:
       - self-hosted
       - windows
       - self-hosted-windows-lv2020x64
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -387,7 +592,7 @@ jobs:
 
   build-x64-ppl-windows:
     runs-on: windows-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -557,7 +762,7 @@ jobs:
 
   build-x64-ppl-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, build-x64-ppl-windows]
+    needs: [docker-ci, build-x64-ppl-windows]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -728,7 +933,7 @@ jobs:
 
   gather-release-notes:
     runs-on: ubuntu-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -787,7 +992,7 @@ jobs:
 
   resolve-labview-profile:
     runs-on: ubuntu-latest
-    needs: [contract-tests]
+    needs: [docker-ci]
     outputs:
       source_labview_year: ${{ steps.source-labels.outputs.source_labview_year }}
       source_runner_label_x86: ${{ steps.source-labels.outputs.source_runner_label_x86 }}
@@ -971,7 +1176,7 @@ jobs:
 
   prepare-vipb-linux:
     runs-on: ubuntu-latest
-    needs: [contract-tests, gather-release-notes, resolve-labview-profile]
+    needs: [docker-ci, gather-release-notes, resolve-labview-profile]
     env:
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
@@ -1418,7 +1623,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
           $requiredFiles = @(
-            'Tooling/Invoke-VipBuild.ps1',
             '.github/actions/build-lvlibp/BuildProjectSpec.ps1',
             '.github/actions/rename-file/Rename-file.ps1',
             'Tooling/support/LabVIEWVersion.ps1',
@@ -1430,8 +1634,8 @@ jobs:
               throw "Missing required source project asset '$fullPath'."
             }
           }
-          if (-not (Get-Command g-cli -ErrorAction SilentlyContinue)) {
-            throw "Required command 'g-cli' not found on PATH for self-hosted packaging lane."
+          if (-not (Get-Command vipm -ErrorAction SilentlyContinue)) {
+            throw "Required command 'vipm' not found on PATH for self-hosted packaging lane."
           }
 
       - id: labview-version
@@ -1514,16 +1718,139 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -SupportedBitness 32 `
-            -RepoRoot "$consumerRoot" `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT `
-            -SkipWorktreeRootCheck
+          $labviewYear = '${{ steps.labview-version.outputs.year }}'
+          $closeScriptPath = Join-Path $consumerRoot '.github/actions/close-labview/Close_LabVIEW.ps1'
+          $closeScriptBackupPath = Join-Path $consumerRoot '.github/actions/close-labview/Close_LabVIEW.gcli.ps1'
+          if (Test-Path -LiteralPath $closeScriptPath -PathType Leaf) {
+            Move-Item -LiteralPath $closeScriptPath -Destination $closeScriptBackupPath -Force
+            Write-Host ("Temporarily disabled g-cli close hook at '{0}' for native PPL build lane." -f $closeScriptPath)
+          }
+
+          function Invoke-LabVIEWCliClose {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$LabVIEWYear,
+              [Parameter(Mandatory = $true)]
+              [ValidateSet('32', '64')]
+              [string]$Bitness
+            )
+
+            $labviewCli = Get-Command LabVIEWCLI -ErrorAction SilentlyContinue
+            if (-not $labviewCli) {
+              throw "LabVIEWCLI is not available on PATH."
+            }
+
+            $installRoot = if ($Bitness -eq '32') {
+              "C:\Program Files (x86)\National Instruments\LabVIEW $LabVIEWYear"
+            } else {
+              "C:\Program Files\National Instruments\LabVIEW $LabVIEWYear"
+            }
+            $labviewPath = Join-Path $installRoot 'LabVIEW.exe'
+
+            $portValue = $null
+            $bitnessPortEnvName = "LVIE_LABVIEWCLI_PORT_{0}" -f $Bitness
+            foreach ($envName in @($bitnessPortEnvName, 'LVIE_LABVIEWCLI_PORT')) {
+              $candidate = [Environment]::GetEnvironmentVariable($envName)
+              if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $portValue = $candidate.Trim()
+                break
+              }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($portValue)) {
+              $iniPath = Join-Path $installRoot 'LabVIEW.ini'
+              if (Test-Path -LiteralPath $iniPath -PathType Leaf) {
+                foreach ($line in Get-Content -LiteralPath $iniPath -ErrorAction SilentlyContinue) {
+                  if ($line -match '^\s*server\.tcp\.port\s*=\s*(\d+)\s*$') {
+                    $portValue = $Matches[1]
+                    break
+                  }
+                }
+              }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($portValue)) {
+              $portValue = '3363'
+            }
+
+            $closeArgs = @(
+              '-LogToConsole', 'TRUE',
+              '-OperationName', 'CloseLabVIEW',
+              '-LabVIEWPath', $labviewPath,
+              '-PortNumber', $portValue
+            )
+
+            Write-Host ("Closing LabVIEW via LabVIEWCLI ({0}-bit, port {1})." -f $Bitness, $portValue)
+            & LabVIEWCLI @closeArgs
+            $closeExitCode = $LASTEXITCODE
+            if ($closeExitCode -ne 0) {
+              Write-Warning ("LabVIEWCLI CloseLabVIEW returned exit code {0} ({1}-bit)." -f $closeExitCode, $Bitness)
+            }
+          }
+
+          function Test-TargetLabVIEWProcessRunning {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$LabVIEWYear,
+              [Parameter(Mandatory = $true)]
+              [ValidateSet('32', '64')]
+              [string]$Bitness
+            )
+
+            $installRoot = if ($Bitness -eq '32') {
+              "C:\Program Files (x86)\National Instruments\LabVIEW $LabVIEWYear"
+            } else {
+              "C:\Program Files\National Instruments\LabVIEW $LabVIEWYear"
+            }
+
+            $processes = Get-CimInstance Win32_Process -Filter "Name='LabVIEW.exe'" -ErrorAction SilentlyContinue
+            if (-not $processes) {
+              return $false
+            }
+
+            foreach ($process in $processes) {
+              if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+              }
+            }
+
+            return $false
+          }
+
+          try {
+            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+            Start-Sleep -Seconds 2
+
+            $targetLabVIEWStillRunning = Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32'
+            if ($targetLabVIEWStillRunning) {
+              Write-Warning "LabVIEW $labviewYear (32-bit) is still running after initial LabVIEWCLI close; retrying close once."
+              Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+              Start-Sleep -Seconds 2
+              $targetLabVIEWStillRunning = Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32'
+            }
+
+            if ($targetLabVIEWStillRunning) {
+              throw "LabVIEW $labviewYear (32-bit) is still running after LabVIEWCLI close attempts; aborting native x86 PPL build for process isolation."
+            }
+
+            & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
+              -LabVIEWVersion $labviewYear `
+              -SupportedBitness 32 `
+              -RepoRoot "$consumerRoot" `
+              -Major $env:VERSION_MAJOR `
+              -Minor $env:VERSION_MINOR `
+              -Patch $env:VERSION_PATCH `
+              -Build $env:VERSION_BUILD `
+              -Commit $env:VERSION_COMMIT `
+              -SkipWorktreeRootCheck
+
+            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+          } finally {
+            if (Test-Path -LiteralPath $closeScriptBackupPath -PathType Leaf) {
+              Move-Item -LiteralPath $closeScriptBackupPath -Destination $closeScriptPath -Force
+            }
+          }
+
           & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
             -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
             -NewFilename "$consumerRoot/resource/plugins/lv_icon_x86.lvlibp"
@@ -1542,39 +1869,6 @@ jobs:
             throw "Native x86 PPL output not found at '$x86Path'."
           }
 
-      - id: display-info
-        name: Generate VIP display information JSON
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
-          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
-            Get-Content -Raw -Path $releaseNotesPath
-          } else {
-            ''
-          }
-
-          $info = @{
-            "Package Version" = @{
-              "major" = [int]$env:VERSION_MAJOR
-              "minor" = [int]$env:VERSION_MINOR
-              "patch" = [int]$env:VERSION_PATCH
-              "build" = [int]$env:VERSION_BUILD
-            }
-            "Product Name" = "labview-icon-editor"
-            "Company Name" = "${{ github.repository_owner }}"
-            "Author Name (Person or Company)" = "${{ github.repository }}"
-            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
-            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
-            "Product Description Summary" = "labview-icon-editor VI Package build."
-            "Product Description" = "labview-icon-editor VI Package build."
-            "Release Notes - Change Log" = $releaseNotes
-          }
-
-          $json = $info | ConvertTo-Json -Depth 6 -Compress
-          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
       - name: Upload consumed VIPB (post-mortem)
         if: always()
         uses: actions/upload-artifact@v4
@@ -1585,25 +1879,35 @@ jobs:
 
       - name: Build VI Package (LV 64-bit)
         shell: pwsh
-        env:
-          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
         run: |
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/Tooling/Invoke-VipBuild.ps1" `
-            -SupportedBitness 64 `
-            -RepoRoot "$consumerRoot" `
-            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT `
-            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
-            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON `
-            -VipmTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS
+          $vipmCommunityEdition = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:VIPM_COMMUNITY_EDITION)) {
+            $vipmCommunityEdition = $env:VIPM_COMMUNITY_EDITION.Trim().ToLowerInvariant() -in @('1', 'true', 'yes', 'on')
+          }
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'vipm-build-self-hosted'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-VipmBuildPackage.ps1" `
+            -SourceProjectRoot $consumerRoot `
+            -VipbPath 'Tooling/deployment/NI Icon editor.vipb' `
+            -LabVIEWVersionYear '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWBitness '64' `
+            -OutputDirectory $outputDirectory `
+            -VipmCommunityEdition:$vipmCommunityEdition `
+            -CommandTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS `
+            -EnforceLabVIEWProcessIsolation
+
+      - name: Upload VIPM package build diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipm-build-self-hosted-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipm-build-self-hosted
+          if-no-files-found: warn
 
       - id: locate-vip
         name: Locate built VI package
@@ -1835,5 +2139,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "Self-hosted CI final gate passed."
+
 
 

@@ -36,8 +36,11 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'RUN_LV2020_EDGE_SMOKE:\s*\$\{\{\s*inputs\.run_lv2020_edge_smoke'
     }
 
-    It 'defines ordered contract-tests then lunit smoke, windows or linux build jobs plus release-notes/profile/VIPB prep then self-hosted package, install, and final gate jobs' {
-        $script:workflowContent | Should -Match 'contract-tests:'
+    It 'defines ordered docker-ci then non-gating pylavi/runner-cli lanes, then lunit smoke, windows or linux build jobs plus release-notes/profile/VIPB prep then self-hosted package, install, and final gate jobs' {
+        $script:workflowContent | Should -Match 'docker-ci:'
+        $script:workflowContent | Should -Not -Match 'contract-tests:'
+        $script:workflowContent | Should -Match 'validate-pylavi-docker-source-project:'
+        $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:'
@@ -48,19 +51,27 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'build-vip-self-hosted:'
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:'
         $script:workflowContent | Should -Match 'ci-self-hosted-final-gate:'
+        $script:workflowContent | Should -Match 'validate-pylavi-docker-source-project:\s*[\s\S]*?needs:\s*\[docker-ci\]'
+        $script:workflowContent | Should -Match 'validate-pylavi-docker-source-project:\s*[\s\S]*?continue-on-error:\s*true'
+        $script:workflowContent | Should -Match 'validate-pylavi-docker-source-project:\s*[\s\S]*?Run deterministic pylavi Docker validation'
+        $script:workflowContent | Should -Match 'docker-contract-pylavi-source-project-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:\s*[\s\S]*?needs:\s*\[docker-ci\]'
+        $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:\s*[\s\S]*?continue-on-error:\s*true'
+        $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:\s*[\s\S]*?Build runner-cli in deterministic Linux Docker lane'
+        $script:workflowContent | Should -Match 'docker-contract-runner-cli-linux-x64-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}))'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?needs:\s*\[contract-tests,\s*resolve-labview-profile\]'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?needs:\s*\[docker-ci,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:\s*[\s\S]*?if:\s*\$\{\{\s*inputs\.run_lv2020_edge_smoke == true \|\| inputs\.run_lv2020_edge_smoke == ''true'''
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:\s*[\s\S]*?needs:\s*\[docker-ci\]'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
-        $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?needs:\s*\[contract-tests\]'
-        $script:workflowContent | Should -Match 'build-x64-ppl-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*build-x64-ppl-windows\]'
+        $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?needs:\s*\[docker-ci\]'
+        $script:workflowContent | Should -Match 'build-x64-ppl-linux:\s*[\s\S]*?needs:\s*\[docker-ci,\s*build-x64-ppl-windows\]'
         $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
-        $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'gather-release-notes:\s*[\s\S]*?needs:\s*\[docker-ci\]'
         $script:workflowContent | Should -Match 'resolve-labview-profile:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
-        $script:workflowContent | Should -Match 'resolve-labview-profile:\s*[\s\S]*?needs:\s*\[contract-tests\]'
+        $script:workflowContent | Should -Match 'resolve-labview-profile:\s*[\s\S]*?needs:\s*\[docker-ci\]'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
-        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[contract-tests,\s*gather-release-notes,\s*resolve-labview-profile\]'
+        $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[docker-ci,\s*gather-release-notes,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\},\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}))'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux,\s*run-lunit-smoke-lv2020x64,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Not -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[[^\]]*run-lunit-smoke-lv2020x64-edge'
@@ -220,6 +231,40 @@ Describe 'Docker contract CI workflow contract' {
         @($errors).Count | Should -Be 0
     }
 
+    It 'keeps the pylavi Docker summary PowerShell block parse-safe' {
+        $summaryStepMatch = [regex]::Match(
+            $script:workflowContent,
+            '- name: Publish pylavi Docker validation summary[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name: Upload pylavi Docker validation artifact',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryStepMatch.Success | Should -BeTrue
+
+        $summaryScript = $summaryStepMatch.Groups['script'].Value
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'keeps the runner-cli Docker summary PowerShell block parse-safe' {
+        $summaryStepMatch = [regex]::Match(
+            $script:workflowContent,
+            '- name: Publish runner-cli Linux Docker summary[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name: Upload runner-cli Linux Docker artifact',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryStepMatch.Success | Should -BeTrue
+
+        $summaryScript = $summaryStepMatch.Groups['script'].Value
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'does not use inline if expressions inside -f format calls in workflow scripts' {
+        $script:workflowContent | Should -Not -Match '-f\s+\(if\s+\('
+    }
+
     It 'asserts source project remotes in each self-hosted job before consumer-script execution' {
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?Assert source project remotes'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?Assert source project remotes'
@@ -313,10 +358,14 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'BuildProjectSpec\.ps1'
         $script:workflowContent | Should -Match 'Upload consumed VIPB \(post-mortem\)'
         $script:workflowContent | Should -Match 'docker-contract-vipb-modified-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'Invoke-VipBuild\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-VipmBuildPackage\.ps1'
+        $script:workflowContent | Should -Match 'Required command ''vipm'' not found on PATH for self-hosted packaging lane'
+        $script:workflowContent | Should -Not -Match 'Required command ''g-cli'' not found on PATH for self-hosted packaging lane'
         $script:workflowContent | Should -Match '-Major \$env:VERSION_MAJOR'
         $script:workflowContent | Should -Match '-Minor \$env:VERSION_MINOR'
         $script:workflowContent | Should -Match '-Patch \$env:VERSION_PATCH'
+        $script:workflowContent | Should -Match 'Upload VIPM package build diagnostics artifact'
+        $script:workflowContent | Should -Match 'docker-contract-vipm-build-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'docker-contract-vip-package-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
     }
 

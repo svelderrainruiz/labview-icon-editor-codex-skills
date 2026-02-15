@@ -45,6 +45,10 @@ A release candidate run is GO-eligible only if all are true:
 
 If any condition fails: NO-GO (no release publish).
 
+Non-gating diagnostic lanes in `ci.yml` (advisory, not GO/NO-GO blockers):
+- `validate-pylavi-docker-source-project` (artifact `docker-contract-pylavi-source-project-<run_id>`)
+- `build-runner-cli-linux-docker` (artifact `docker-contract-runner-cli-linux-x64-<run_id>`)
+
 ## 4) Dispatch source of truth
 Use skills repo release workflow inputs in `.github/workflows/release-skill-layer.yml`:
 - `release_tag`
@@ -86,6 +90,9 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - LV2020 smoke command contract is run-only:
   - `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>`
   - no deterministic `g-cli ... lunit -- -h` preflight.
+- VIP package build path uses VIPM CLI:
+  - `Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
+  - g-cli is limited to LUnit smoke only.
 - Source-year override behavior:
   - the job keeps key `run-lunit-smoke-lv2020x64` for compatibility,
   - execution target year and `.lvversion` are resolved from effective target selection in `resolve-labview-profile`,

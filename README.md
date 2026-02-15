@@ -47,12 +47,14 @@ Installer contract:
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
-  - `contract-tests` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
-  - optional: `contract-tests` -> `run-lunit-smoke-lv2020x64-edge` (non-gating LV2020 x64 edge diagnostics)
-  - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
-  - `contract-tests` -> `gather-release-notes`
-  - `contract-tests` -> `resolve-labview-profile`
-  - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
+  - `docker-ci` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
+  - optional: `docker-ci` -> `run-lunit-smoke-lv2020x64-edge` (non-gating LV2020 x64 edge diagnostics)
+  - `docker-ci` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
+  - `docker-ci` -> `gather-release-notes`
+  - `docker-ci` -> `resolve-labview-profile`
+  - `docker-ci` -> `validate-pylavi-docker-source-project` (non-gating deterministic source-project LabVIEW file validation in Docker)
+  - `docker-ci` -> `build-runner-cli-linux-docker` (non-gating deterministic runner-cli Linux Docker build/test/publish diagnostics)
+  - `docker-ci` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
   - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020x64`
   - `build-vip-self-hosted` + `resolve-labview-profile` -> `install-vip-x86-self-hosted`
   - `build-vip-self-hosted` + `install-vip-x86-self-hosted` -> `ci-self-hosted-final-gate`
@@ -101,6 +103,9 @@ Installer contract:
     - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
     - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
     - build native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - VIP package build path uses VIPM CLI:
+    - `scripts/Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
+    - g-cli is limited to LUnit smoke only.
   - package version baseline for native lane: `0.1.0.<run_number>`
   - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
   - post-package VIPM install smoke (`install-vip-x86-self-hosted`) runs with:
@@ -135,6 +140,19 @@ Installer contract:
     - `workspace/lvversion.after`
   - optional `docker-contract-lunit-smoke-lv2020-edge-<run_id>` containing:
     - LV2020 edge diagnostics from non-gating job `run-lunit-smoke-lv2020x64-edge` when enabled
+  - `docker-contract-pylavi-source-project-<run_id>` containing:
+    - `pylavi-docker.status.json`
+    - `pylavi-docker.result.json`
+    - `pylavi-docker.log`
+    - `vi-validate.stdout.txt`
+    - `vi-validate.stderr.txt`
+  - `docker-contract-runner-cli-linux-x64-<run_id>` containing:
+    - `runner-cli-linux-docker.status.json`
+    - `runner-cli-linux-docker.result.json`
+    - `runner-cli-linux-docker.log`
+    - `runner-cli-linux-docker.stdout.txt`
+    - `runner-cli-linux-docker.stderr.txt`
+    - `publish/linux-x64/runner-cli`
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
     - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
     - `vipb.before.xml`, `vipb.after.xml`
@@ -147,6 +165,13 @@ Installer contract:
     - `profile-resolution.input.json`
   - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
     - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
+  - `docker-contract-vipm-build-self-hosted-<run_id>` containing:
+    - `vipm-build.status.json`
+    - `vipm-build.result.json`
+    - `vipm-build.log`
+    - `commands/help-build.txt`
+    - `commands/build.txt`
+    - `commands/activate.txt` (when community activation is enabled)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
   - `docker-contract-vipm-install-x86-<run_id>` containing:

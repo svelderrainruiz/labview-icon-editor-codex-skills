@@ -20,6 +20,10 @@ From skills repo CI run metadata:
 - docker-contract-vip-package-self-hosted-<run_id>
 - codex-skill-layer
 
+## Advisory artifacts (non-gating)
+- docker-contract-pylavi-source-project-<run_id> (diagnostic source-project pylavi validation)
+- docker-contract-runner-cli-linux-x64-<run_id> (diagnostic runner-cli Linux Docker build/test/publish)
+
 ## Release payload contract
 Release publish must include these files:
 - lvie-codex-skill-layer-installer.exe
@@ -78,6 +82,10 @@ Optional inputs:
   - CI enforces process isolation (`-EnforceLabVIEWProcessIsolation`) and clears active LabVIEW processes before LV2020 run and before control probe.
   - if active LabVIEW processes cannot be cleared, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
   - `-AllowNoTestcasesWhenControlProbePasses` is only used by optional `run-lunit-smoke-lv2020x64-edge`.
+- VIP package build path uses VIPM CLI:
+  - self-hosted package lane runs `Invoke-VipmBuildPackage.ps1`
+  - this lane builds the `.vip` via `vipm build` against the effective `.lvversion` target year (x64)
+  - g-cli is limited to LUnit smoke only.
 - optional non-gating LV2020 edge smoke:
   - enabled via `run_lv2020_edge_smoke: true`
   - runs in `run-lunit-smoke-lv2020x64-edge`

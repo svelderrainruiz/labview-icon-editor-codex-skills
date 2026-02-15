@@ -89,7 +89,14 @@ Describe 'Agent docs contract' {
         $quickstart | Should -Match 'run_lv2020_edge_smoke'
         $quickstart | Should -Match 'major\.minor'
         $quickstart | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+        $quickstart | Should -Match 'VIP package build path uses VIPM CLI'
+        $quickstart | Should -Match 'Invoke-VipmBuildPackage\.ps1'
+        $quickstart | Should -Match 'g-cli is limited to LUnit smoke only'
         $quickstart | Should -Match 'run-lunit-smoke-lv2020x64-edge'
+        $quickstart | Should -Match 'validate-pylavi-docker-source-project'
+        $quickstart | Should -Match 'docker-contract-pylavi-source-project-<run_id>'
+        $quickstart | Should -Match 'build-runner-cli-linux-docker'
+        $quickstart | Should -Match 'docker-contract-runner-cli-linux-x64-<run_id>'
         $releaseGates | Should -Match '## Self-hosted preflight policy'
         $releaseGates | Should -Match 'Assert-SourceProjectRemotes\.ps1'
         $releaseGates | Should -Match 'git ls-remote upstream'
@@ -97,7 +104,12 @@ Describe 'Agent docs contract' {
         $releaseGates | Should -Match '-EnforceLabVIEWProcessIsolation'
         $releaseGates | Should -Match 'source_labview_version_override'
         $releaseGates | Should -Match 'run_lv2020_edge_smoke'
+        $releaseGates | Should -Match 'Invoke-VipmBuildPackage\.ps1'
+        $releaseGates | Should -Match 'VIP package build path uses VIPM CLI'
         $releaseGates | Should -Match 'optional non-gating LV2020 edge smoke'
+        $releaseGates | Should -Match 'Advisory artifacts \(non-gating\)'
+        $releaseGates | Should -Match 'docker-contract-pylavi-source-project-<run_id>'
+        $releaseGates | Should -Match 'docker-contract-runner-cli-linux-x64-<run_id>'
     }
 }
 
