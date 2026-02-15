@@ -556,12 +556,15 @@ $workspaceDiagnosticsDirectory = Join-Path $resolvedOutputDirectory 'workspace'
 Ensure-Directory -Path $reportsDirectory
 Ensure-Directory -Path $workspaceDiagnosticsDirectory
 
+$primaryReportFileName = "lunit-report-lv{0}-x{1}.xml" -f [string]$TargetLabVIEWVersion, [string]$RequiredBitness
+$controlReportFileName = 'lunit-report-lv2026-x64-control.xml'
+
 $paths = [ordered]@{
     status_path = Join-Path $resolvedOutputDirectory 'lunit-smoke.status.json'
     result_path = Join-Path $resolvedOutputDirectory 'lunit-smoke.result.json'
     log_path = Join-Path $resolvedOutputDirectory 'lunit-smoke.log'
-    report_path = Join-Path $reportsDirectory 'lunit-report-64.xml'
-    control_report_path = Join-Path $reportsDirectory 'lunit-report-2026-control.xml'
+    report_path = Join-Path $reportsDirectory $primaryReportFileName
+    control_report_path = Join-Path $reportsDirectory $controlReportFileName
     lvversion_before_path = Join-Path $workspaceDiagnosticsDirectory 'lvversion.before'
     lvversion_after_path = Join-Path $workspaceDiagnosticsDirectory 'lvversion.after'
 }

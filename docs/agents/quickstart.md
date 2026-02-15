@@ -90,8 +90,8 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - LV2020 remains strict: a failed LV2020 outcome blocks downstream self-hosted jobs even if the LV2026 control probe passes.
 - Triage order for LV2020 smoke:
   1. `lunit-smoke.result.json`
-  2. `reports/lunit-report-64.xml`
-  3. `reports/lunit-report-2026-control.xml` (if present)
+  2. `reports/lunit-report-lv2020-x64.xml`
+  3. `reports/lunit-report-lv2026-x64-control.xml` (if present)
   4. `lunit-smoke.log`
 
 ## 7) Canonical references

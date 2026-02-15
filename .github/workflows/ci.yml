@@ -155,7 +155,7 @@ jobs:
           $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020'
           $statusPath = Join-Path $outputDirectory 'lunit-smoke.status.json'
           $resultPath = Join-Path $outputDirectory 'lunit-smoke.result.json'
-          $reportPath = Join-Path $outputDirectory 'reports/lunit-report-64.xml'
+          $reportPath = Join-Path $outputDirectory 'reports/lunit-report-lv2020-x64.xml'
           $artifactName = "docker-contract-lunit-smoke-lv2020-$env:GITHUB_RUN_ID"
 
           $status = 'unknown'

@@ -121,8 +121,8 @@ Installer contract:
     - `lunit-smoke.status.json`
     - `lunit-smoke.result.json`
     - `lunit-smoke.log`
-    - `reports/lunit-report-64.xml`
-    - `reports/lunit-report-2026-control.xml` (only when LV2020 path fails and control probe executes)
+    - `reports/lunit-report-lv2020-x64.xml`
+    - `reports/lunit-report-lv2026-x64-control.xml` (only when LV2020 path fails and control probe executes)
     - `workspace/lvversion.before`
     - `workspace/lvversion.after`
   - `docker-contract-vipb-prepared-linux-<run_id>` containing:
