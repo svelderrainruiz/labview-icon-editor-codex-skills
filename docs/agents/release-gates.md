@@ -90,8 +90,8 @@ Optional inputs:
   - `upstream` must resolve to `https://github.com/<source-project-repo>.git`
   - non-interactive `git ls-remote upstream` must succeed
   - failures are hard-gate failures, not warnings.
-- `run-lunit-smoke-lv2020x64` remains a strict gate:
-  - job key remains `run-lunit-smoke-lv2020x64` for compatibility, but execution target year is resolved from effective LabVIEW target selection.
+- `run-lunit-smoke-x64` remains a strict gate:
+  - execution target year is resolved from effective LabVIEW target selection.
   - when `source_labview_version_override` is provided, it must be `major.minor` and `>=20.0`, and becomes the effective CI target.
   - when override is not provided, observed source project `.lvversion` is used.
   - LV2020 failure is blocking.

@@ -10,7 +10,7 @@ Provide a fast map of deterministic CI/release jobs and artifacts for GO/NO-GO a
 | Job | Role | Release impact |
 | --- | --- | --- |
 | `docker-ci` | contract suite and deterministic Docker test baseline | required |
-| `run-lunit-smoke-lv2020x64` | required native smoke gate (effective target year resolver-driven) | required |
+| `run-lunit-smoke-x64` | required native smoke gate (effective target year resolver-driven) | required |
 | `build-x64-ppl-windows` | Windows x64 PPL artifact lane | required |
 | `build-x64-ppl-linux` | Linux x64 PPL artifact lane | required |
 | `prepare-vipb-linux` | authoritative VIPB diagnostics/prep lane | required |

@@ -84,7 +84,7 @@ Describe 'Agent docs contract' {
         $quickstart | Should -Match 'diagnostic-only LV2026 x64 control probe'
         $quickstart | Should -Match '-EnforceLabVIEWProcessIsolation'
         $quickstart | Should -Match 'skipped_unable_to_clear_active_labview_processes'
-        $quickstart | Should -Match 'run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses'
+        $quickstart | Should -Match 'run-lunit-smoke-x64` does not use `-AllowNoTestcasesWhenControlProbePasses'
         $quickstart | Should -Match 'run-lunit-smoke-lv2020x64-edge'
         $quickstart | Should -Match 'source_labview_version_override'
         $quickstart | Should -Match 'run_lv2020_edge_smoke'

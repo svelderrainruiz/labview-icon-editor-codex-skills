@@ -68,7 +68,7 @@ Installer contract:
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
   - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
 - Pipeline order:
-  - `docker-ci` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
+  - `docker-ci` -> `run-lunit-smoke-x64` (required native smoke gate on self-hosted Windows)
   - optional: `docker-ci` -> `run-lunit-smoke-lv2020x64-edge` (non-gating LV2020 x64 edge diagnostics)
   - `docker-ci` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
   - `docker-ci` -> `gather-release-notes`
@@ -76,7 +76,7 @@ Installer contract:
   - `docker-ci` -> `validate-pylavi-docker-source-project` (non-gating deterministic source-project LabVIEW file validation in Docker)
   - `docker-ci` -> `build-runner-cli-linux-docker` (non-gating deterministic runner-cli Linux Docker build/test/publish diagnostics)
   - `docker-ci` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
-  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020x64`
+  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-x64`
   - `build-vip-self-hosted` + `resolve-labview-profile` -> `install-vip-x86-self-hosted`
   - `build-vip-self-hosted` + `install-vip-x86-self-hosted` -> `ci-self-hosted-final-gate`
 - LabVIEW target presets (advisory):
@@ -105,13 +105,13 @@ Installer contract:
 - Native self-hosted packaging contract:
   - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
   - required smoke/build runner labels are resolved from effective source project LabVIEW target via `resolve-labview-profile` outputs: `source_runner_label_x64` and `source_runner_label_x86` (`self-hosted-windows-lv<YYYY>x64/x86`).
-  - `run-lunit-smoke-lv2020x64` keeps the existing job key for compatibility but executes against source-year target (`--lv-ver <YYYY>`) with canonical direct run command only: `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
-  - `run-lunit-smoke-lv2020x64` enforces required `64-bit` coverage only.
-  - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=<effective .lvversion>` there (source checkout remains unchanged).
+  - required smoke job key is `run-lunit-smoke-x64`; it executes against source-year target (`--lv-ver <YYYY>`) with canonical direct run command only: `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
+  - `run-lunit-smoke-x64` enforces required `64-bit` coverage only.
+  - `run-lunit-smoke-x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=<effective .lvversion>` there (source checkout remains unchanged).
   - optional edge diagnostics lane `run-lunit-smoke-lv2020x64-edge` can be enabled with `run_lv2020_edge_smoke: true`; it always runs fixed `2020` + `20.0` and never blocks downstream gates.
-  - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for the selected smoke target year x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
+  - `run-lunit-smoke-x64` performs required VIPM package preflight for the selected smoke target year x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
   - when LV2020 smoke fails with comparable validation outcomes (`no_testcases` or `failed_testcases`), the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary.
-  - CI runs `run-lunit-smoke-lv2020x64` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before the LV2020 run and again before any LV2026 control probe.
+  - CI runs `run-lunit-smoke-x64` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before the LV2020 run and again before any LV2026 control probe.
   - if active LabVIEW processes cannot be cleared, the control probe is skipped with explicit reason `skipped_unable_to_clear_active_labview_processes`.
   - required lane behavior is strict: LV2020 `no_testcases` still fails even when LV2026 control probe passes.
   - `-AllowNoTestcasesWhenControlProbePasses` is limited to the optional `run-lunit-smoke-lv2020x64-edge` diagnostics lane.

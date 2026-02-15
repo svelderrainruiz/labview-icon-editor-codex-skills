@@ -41,7 +41,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Not -Match 'contract-tests:'
         $script:workflowContent | Should -Match 'validate-pylavi-docker-source-project:'
         $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-x64:'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:'
         $script:workflowContent | Should -Match 'build-x64-ppl-linux:'
@@ -59,8 +59,8 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:\s*[\s\S]*?continue-on-error:\s*true'
         $script:workflowContent | Should -Match 'build-runner-cli-linux-docker:\s*[\s\S]*?Build runner-cli in deterministic Linux Docker lane'
         $script:workflowContent | Should -Match 'docker-contract-runner-cli-linux-x64-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}))'
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?needs:\s*\[docker-ci,\s*resolve-labview-profile\]'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-x64:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}))'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-x64:\s*[\s\S]*?needs:\s*\[docker-ci,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:\s*[\s\S]*?if:\s*\$\{\{\s*inputs\.run_lv2020_edge_smoke == true \|\| inputs\.run_lv2020_edge_smoke == ''true'''
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64-edge:\s*[\s\S]*?needs:\s*\[docker-ci\]'
         $script:workflowContent | Should -Match 'build-x64-ppl-windows:\s*[\s\S]*?runs-on:\s*windows-latest'
@@ -73,7 +73,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?runs-on:\s*ubuntu-latest'
         $script:workflowContent | Should -Match 'prepare-vipb-linux:\s*[\s\S]*?needs:\s*\[docker-ci,\s*gather-release-notes,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?runs-on:\s*(\[\s*self-hosted,\s*windows,\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\},\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}\s*\]|(?:\r?\n\s*-\s*self-hosted\r?\n\s*-\s*windows\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x64\s*\}\}\r?\n\s*-\s*\$\{\{\s*needs\.resolve-labview-profile\.outputs\.source_runner_label_x86\s*\}\}))'
-        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux,\s*run-lunit-smoke-lv2020x64,\s*resolve-labview-profile\]'
+        $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[build-x64-ppl-windows,\s*build-x64-ppl-linux,\s*prepare-vipb-linux,\s*run-lunit-smoke-x64,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Not -Match 'build-vip-self-hosted:\s*[\s\S]*?needs:\s*\[[^\]]*run-lunit-smoke-lv2020x64-edge'
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?needs:\s*\[build-vip-self-hosted,\s*resolve-labview-profile\]'
         $script:workflowContent | Should -Match 'ci-self-hosted-final-gate:\s*[\s\S]*?needs:\s*\[build-vip-self-hosted,\s*install-vip-x86-self-hosted\]'
@@ -173,11 +173,11 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'runs native LabVIEW lunit smoke gate in x64 with source-version target and uploads diagnostics artifact' {
-        $runLunitBlockMatch = [regex]::Match($script:workflowContent, 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?run-lunit-smoke-lv2020x64-edge:', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        $runLunitBlockMatch = [regex]::Match($script:workflowContent, 'run-lunit-smoke-x64:\s*[\s\S]*?run-lunit-smoke-lv2020x64-edge:', [System.Text.RegularExpressions.RegexOptions]::Singleline)
         $runLunitBlockMatch.Success | Should -BeTrue
         $runLunitBlock = $runLunitBlockMatch.Value
 
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-x64:'
         $script:workflowContent | Should -Match 'Run native LabVIEW LUnit smoke \(x64, source-version target\)'
         $script:workflowContent | Should -Match 'scripts/Invoke-LunitSmokeLv2020\.ps1'
         $script:workflowContent | Should -Not -Match 'Resolve LUnit smoke execution target'
@@ -266,7 +266,7 @@ Describe 'Docker contract CI workflow contract' {
     }
 
     It 'asserts source project remotes in each self-hosted job before consumer-script execution' {
-        $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?Assert source project remotes'
+        $script:workflowContent | Should -Match 'run-lunit-smoke-x64:\s*[\s\S]*?Assert source project remotes'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?Assert source project remotes'
         $script:workflowContent | Should -Match 'install-vip-x86-self-hosted:\s*[\s\S]*?Assert source project remotes'
         $script:workflowContent | Should -Match 'scripts/Assert-SourceProjectRemotes\.ps1'

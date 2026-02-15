@@ -93,7 +93,7 @@ Compatibility-only (deprecated) inputs:
 ```powershell
 gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
 ```
-- `run-lunit-smoke-lv2020x64` uses resolved source-year x64 label from `resolve-labview-profile` output (`self-hosted-windows-lv<YYYY>x64`).
+- `run-lunit-smoke-x64` uses resolved source-year x64 label from `resolve-labview-profile` output (`self-hosted-windows-lv<YYYY>x64`).
 - Self-hosted jobs enforce source-project remote hygiene via `Assert-SourceProjectRemotes.ps1`:
   - sets/updates `upstream` to `https://github.com/<source-project-repo>.git`
   - validates non-interactive `git ls-remote upstream`
@@ -105,7 +105,7 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
   - `Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
   - g-cli is limited to LUnit smoke only.
 - Source-year override behavior:
-  - the job keeps key `run-lunit-smoke-lv2020x64` for compatibility,
+  - required job key is `run-lunit-smoke-x64`,
   - execution target year and `.lvversion` are resolved from effective target selection in `resolve-labview-profile`,
   - when provided, `source_labview_version_override` is authoritative for CI execution target (format `major.minor`; Minimum supported LabVIEW version is 20.0),
   - when override is omitted, source project `.lvversion` is used.
@@ -115,7 +115,7 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - On LV2020 smoke failure, CI may run a diagnostic-only LV2026 x64 control probe (for comparable outcomes like `no_testcases` / `failed_testcases`) and writes comparative results into `lunit-smoke.result.json` and the job summary.
 - CI invokes `Invoke-LunitSmokeLv2020.ps1` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before LV2020 run and before any LV2026 control probe.
 - If process isolation cannot clear active LabVIEW instances, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
-- Required lane is strict: `run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses`.
+- Required lane is strict: `run-lunit-smoke-x64` does not use `-AllowNoTestcasesWhenControlProbePasses`.
 - `-AllowNoTestcasesWhenControlProbePasses` is limited to optional `run-lunit-smoke-lv2020x64-edge`.
 - All other LV2020 smoke failures remain blocking for downstream self-hosted jobs.
 - Triage order for LV2020 smoke:
