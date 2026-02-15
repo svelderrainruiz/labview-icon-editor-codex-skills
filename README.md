@@ -14,32 +14,161 @@ Layered Codex skill assets for `labview-icon-editor` CI/runtime integrations.
   - `vipm-cli-machine/*`
 
 ## Release contract
-The release asset is pinned by the consumer lock file and validated by:
+The release assets are pinned by the source project lock file and validated by:
 - SHA256 digest
 - required files list
 - manifest `license_spdx` (`0BSD`)
 
-Parity evidence contract:
-- Primary evidence source is this repository's `labview-parity-gate` workflow run URL.
-- `labview-parity-gate` performs a consumer sandbox preflight by cloning `consumer_ref`, asserting `HEAD == consumer_sha`, and emitting a static evidence artifact.
-- Consumer parity run URL is retained as secondary provenance in release notes.
-- Upstream `svelderrainruiz/labview-icon-editor` requires strict triple parity (`Linux`, `Self-Hosted`, `Windows`).
-- Fork consumers are accepted with container-only parity requirements (`Linux`, `Windows`).
+CI-gated release contract:
+- Primary release gate is this repository's `CI Pipeline` workflow (`.github/workflows/ci.yml`) invoked by `release-skill-layer`.
+- `release-skill-layer` dispatch remains explicit for source project pinning (`consumer_repo`, `consumer_ref`, `consumer_sha`), then passes those values into reusable `ci.yml`.
+- Release payload includes the NSIS installer and core CI artifacts:
+  - `lvie-codex-skill-layer-installer.exe`
+  - `lvie-ppl-bundle-windows-x64.zip`
+  - `lvie-ppl-bundle-linux-x64.zip`
+  - `lvie-vip-package-self-hosted.zip`
+  - `release-provenance.json`
+  - `release-payload-manifest.json`
 
 Installer contract:
 - Canonical NSIS root: `C:\Program Files (x86)\NSIS`
 - Required binary: `C:\Program Files (x86)\NSIS\makensis.exe`
 - Optional override: repository variable `NSIS_ROOT` or script argument `-MakensisPath`
 - NSIS headless install supports `/S`.
-- Consumer lock defines installer args and install-root template.
+- Source project lock defines installer args and install-root template.
 
 ## Docker CI
-- Workflow: `.github/workflows/docker-contract-ci.yml`
-- Purpose: run repository contract tests (`tests/*.Tests.ps1`) inside Docker.
-- Trigger: pull requests touching contracts/scripts/docs/manifest and manual `workflow_dispatch`.
+- Workflow: `.github/workflows/ci.yml`
+- Purpose: run repository contract tests, build deterministic Windows/Linux container PPL bundles, run a full VIPB diagnostics suite on Linux, build a native self-hosted Windows VI package, then validate VIPM install/uninstall on x86.
+- Trigger: all pull requests and manual `workflow_dispatch` with optional inputs:
+  - `labview_profile` (target preset id, default `lv2026`)
+  - `source_labview_version_override` (effective `.lvversion` override, format `major.minor`, minimum `20.0`)
+  - `run_lv2020_edge_smoke` (optional non-gating LV2020 x64 edge diagnostics, default `false`)
 - Shared test runner: `scripts/Invoke-ContractTests.ps1` (used by local/container execution paths).
+  - Test results are emitted to a unique temp NUnit XML path by default (`RUNNER_TEMP`/`TEMP`) to avoid `testResults.xml` lock contention.
+- Pipeline order:
+  - `contract-tests` -> `run-lunit-smoke-lv2020x64` (required native smoke gate on self-hosted Windows)
+  - optional: `contract-tests` -> `run-lunit-smoke-lv2020x64-edge` (non-gating LV2020 x64 edge diagnostics)
+  - `contract-tests` -> `build-x64-ppl-windows` -> `build-x64-ppl-linux`
+  - `contract-tests` -> `gather-release-notes`
+  - `contract-tests` -> `resolve-labview-profile`
+  - `contract-tests` + `gather-release-notes` + `resolve-labview-profile` -> `prepare-vipb-linux`
+  - `build-vip-self-hosted` needs `build-x64-ppl-windows`, `build-x64-ppl-linux`, `prepare-vipb-linux`, and `run-lunit-smoke-lv2020x64`
+  - `build-vip-self-hosted` + `resolve-labview-profile` -> `install-vip-x86-self-hosted`
+  - `build-vip-self-hosted` + `install-vip-x86-self-hosted` -> `ci-self-hosted-final-gate`
+- LabVIEW target presets (advisory):
+  - target preset catalog is repo-owned under `profiles/labview`.
+  - target preset resolution runs in `resolve-labview-profile` and publishes `docker-contract-labview-profile-resolution-<run_id>`.
+  - target preset mismatch vs source project emits `::warning` + summary advisory.
+  - `source_labview_version_override` can intentionally set an effective `.lvversion` for CI execution (for example `26.0`, `25.0`), while source project `.lvversion` remains the observed baseline.
+  - override validation is deterministic: format `major.minor`, minimum supported version `20.0`.
+- VIPB version authority contract:
+  - `prepare-vipb-linux` treats `consumer/.lvversion` (source project) as authoritative for VIPB LabVIEW target.
+  - minimum supported source project `.lvversion` is `20.0`; values earlier than `20.0` fail deterministically.
+  - VIPB prep fails fast when `Package_LabVIEW_Version` differs from `.lvversion` target for selected bitness.
+  - diagnostics artifact is still uploaded for post-mortem (`capture diagnostics, then fail`).
+  - canonical updater script: `scripts/Update-Vipb.DisplayInfo.ps1`; compatibility shim `scripts/Update-VipbDisplayInfo.ps1` is deprecated and forwards to canonical.
+- Windows parity preflight contract:
+  - `build-x64-ppl-windows` derives `lv_icon_editor.lvproj` path dynamically and injects it into container parity env vars.
+  - `.lvversion` must be colocated with `lv_icon_editor.lvproj`.
+- Failure triage:
+  - when VIPB prep fails, `Fail if VIPB diagnostics suite failed` now logs root cause + authority status inline and points to `prepare-vipb.error.json`, `vipb-diagnostics-summary.md`, and artifact `docker-contract-vipb-prepared-linux-<run_id>`.
+- PPL source contract (CI Pipeline lane):
+  - source project repo: `svelderrainruiz/labview-icon-editor`
+  - source project ref: `patch/456-2020-migration-branch-from-9e46ecf`
+  - expected SHA: `9e46ecf591bc36afca8ddf4ce688a5f58604a12a`
+  - windows output path: `consumer/resource/plugins/lv_icon.windows.lvlibp`
+  - linux output path: `consumer/resource/plugins/lv_icon.linux.lvlibp`
+- Native self-hosted packaging contract:
+  - runner labels (bitness-specific): `[self-hosted, windows, self-hosted-windows-lv2020x64, self-hosted-windows-lv2020x86]`
+  - required smoke/build runner labels are resolved from effective source project LabVIEW target via `resolve-labview-profile` outputs: `source_runner_label_x64` and `source_runner_label_x86` (`self-hosted-windows-lv<YYYY>x64/x86`).
+  - `run-lunit-smoke-lv2020x64` keeps the existing job key for compatibility but executes against source-year target (`--lv-ver <YYYY>`) with canonical direct run command only: `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>` (no deterministic `-h` probe).
+  - `run-lunit-smoke-lv2020x64` enforces required `64-bit` coverage only.
+  - `run-lunit-smoke-lv2020x64` copies the source project to a temp workspace and applies ephemeral `.lvversion=<effective .lvversion>` there (source checkout remains unchanged).
+  - optional edge diagnostics lane `run-lunit-smoke-lv2020x64-edge` can be enabled with `run_lv2020_edge_smoke: true`; it always runs fixed `2020` + `20.0` and never blocks downstream gates.
+  - `run-lunit-smoke-lv2020x64` performs required VIPM package preflight for the selected smoke target year x64: `astemes_lib_lunit` and `sas_workshops_lib_lunit_for_g_cli`.
+  - when LV2020 smoke fails with comparable validation outcomes (`no_testcases` or `failed_testcases`), the script runs a diagnostic-only LV2026 x64 control probe and records comparative outcomes in `lunit-smoke.result.json` and step summary.
+  - CI runs `run-lunit-smoke-lv2020x64` with `-EnforceLabVIEWProcessIsolation`, so active LabVIEW processes are cleared before the LV2020 run and again before any LV2026 control probe.
+  - if active LabVIEW processes cannot be cleared, the control probe is skipped with explicit reason `skipped_unable_to_clear_active_labview_processes`.
+  - required lane behavior is strict: LV2020 `no_testcases` still fails even when LV2026 control probe passes.
+  - `-AllowNoTestcasesWhenControlProbePasses` is limited to the optional `run-lunit-smoke-lv2020x64-edge` diagnostics lane.
+  - all other LV2020 failures still hard-fail the gate.
+  - all self-hosted jobs enforce source project remote hygiene via `scripts/Assert-SourceProjectRemotes.ps1`:
+    - configure `upstream` to `https://github.com/${{ env.CONSUMER_REPO }}.git`
+    - run non-interactive `git ls-remote upstream`
+    - fail deterministically if connectivity/auth contract is not met
+  - `.vipb` flow in self-hosted lane is consume-only:
+    - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
+    - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
+    - build native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - package version baseline for native lane: `0.1.0.<run_number>`
+  - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
+  - post-package VIPM install smoke (`install-vip-x86-self-hosted`) runs with:
+    - `--labview-version <YYYY>` derived from source project `.lvversion` colocated with `lv_icon_editor.lvproj`
+    - fixed `--labview-bitness 32`
+    - install then uninstall for deterministic self-hosted hygiene
+    - dynamic runner label from `resolve-labview-profile` output: `self-hosted-windows-lv<YYYY>x86`
+  - final self-hosted merge gate: `ci-self-hosted-final-gate`
+- Published artifacts:
+  - `docker-contract-ppl-windows-raw-x64-<run_id>` containing:
+    - `consumer/resource/plugins/lv_icon.windows.lvlibp`
+  - `docker-contract-ppl-bundle-windows-x64-<run_id>` containing:
+    - `lv_icon.windows.lvlibp`
+    - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-ppl-linux-raw-x64-<run_id>` containing:
+    - `consumer/resource/plugins/lv_icon.linux.lvlibp`
+  - `docker-contract-ppl-bundle-linux-x64-<run_id>` containing:
+    - `lv_icon.linux.lvlibp`
+    - `ppl-manifest.json` (`ppl_sha256`, `ppl_size_bytes`, LabVIEW version/bitness provenance)
+  - `docker-contract-release-notes-<run_id>` containing:
+    - `release_notes.md`
+    - `release-notes-manifest.json` (SHA256 and size for the gathered release notes payload)
+  - `docker-contract-labview-profile-resolution-<run_id>` containing:
+    - `profile-resolution.json` (selected target preset, source project target, mismatch classification, warning message)
+  - `docker-contract-lunit-smoke-lv2020-<run_id>` containing:
+    - `lunit-smoke.status.json`
+    - `lunit-smoke.result.json`
+    - `lunit-smoke.log`
+    - `reports/lunit-report-lv<effective_year>-x64.xml`
+    - `reports/lunit-report-lv2026-x64-control.xml` (only when LV2020 path fails and control probe executes)
+    - `workspace/lvversion.before`
+    - `workspace/lvversion.after`
+  - optional `docker-contract-lunit-smoke-lv2020-edge-<run_id>` containing:
+    - LV2020 edge diagnostics from non-gating job `run-lunit-smoke-lv2020x64-edge` when enabled
+  - `docker-contract-vipb-prepared-linux-<run_id>` containing:
+    - prepared `NI Icon editor.vipb` (consumed by self-hosted lane)
+    - `vipb.before.xml`, `vipb.after.xml`
+    - `vipb.before.sha256`, `vipb.after.sha256`
+    - `vipb-diff.json`, `vipb-diff-summary.md`
+    - `vipb-diagnostics.json`, `vipb-diagnostics-summary.md`
+    - `prepare-vipb.status.json`, `prepare-vipb.error.json` (failure path)
+    - `prepare-vipb.log`
+    - `display-information.input.json`
+    - `profile-resolution.input.json`
+  - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
+    - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
+  - `docker-contract-vip-package-self-hosted-<run_id>` containing:
+    - latest built `.vip` from the native self-hosted lane
+  - `docker-contract-vipm-install-x86-<run_id>` containing:
+    - `vipm-install.status.json`
+    - `vipm-install.result.json`
+    - `vipm-install.log`
+    - `commands/help.txt`
+    - `commands/list-before.txt`
+    - `commands/install.txt`
+    - `commands/list-after-install.txt`
+    - `commands/uninstall.txt`
+    - `commands/list-after-uninstall.txt`
 - Local run (PowerShell image):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1`
+- Local diagnostics suite exercise (bounded Docker):
+  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PrepareVipbDiagnosticsLocal.ps1`
+  - Default bounds: `--memory=3g`, `--cpus=2`, timeout `300s`.
+  - Fast triage order:
+    1. `vipb-diagnostics-summary.md`
+    2. `vipb-diagnostics.json`
+    3. `prepare-vipb.log`
+    4. `vipb.before.xml` vs `vipb.after.xml`
 - Local run (NI LabVIEW Linux image already on this machine):
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux' -BootstrapPowerShell`
 - Deterministic NI local iteration (recommended):
@@ -63,58 +192,6 @@ Installer contract:
 - VIPM activation contract on NI image:
   - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 -DockerImage 'nationalinstruments/labview:2026q1-linux-pwsh' -TestPath './tests/VipmCliActivationContract.Tests.ps1'`
   - Covers `VIPM_COMMUNITY_EDITION=true` => `vipm activate` preflight behavior.
-
-## Windows->Linux VI Package flow
-- Workflow: `.github/workflows/windows-linux-vipm-package.yml`
-- Purpose: build PPL in Windows LabVIEW image, then build VI Package in Linux LabVIEW image using the exact Windows-built PPL artifact.
-
-### Handoff contract
-- Windows stage emits artifact bundle with:
-  - PPL file
-  - `ppl-manifest.json` containing `ppl_sha256`, `labview_version`, `bitness`, source/run provenance.
-- Linux stage verifies:
-  - bundle manifest exists,
-  - bundle SHA256 matches manifest,
-  - optional explicit SHA matches producer output,
-  - `labview_version` and `bitness` match workflow inputs.
-
-### Dispatch inputs you must provide
-- `consumer_ref`: branch/tag/SHA to build/package.
-- `ppl_build_lane`: `linux-container` (recommended when host cannot run Docker Windows containers) or `windows-container`.
-
-### Optional override inputs
-- `windows_build_command`: custom command for Windows PPL build. Leave blank to use built-in container parity command.
-- `linux_build_command`: custom command for Linux PPL build. Leave blank to use built-in container parity command.
-- `windows_ppl_path`: path to generated PPL in workspace.
-- `linux_ppl_path`: path to generated Linux PPL in workspace.
-- `linux_consume_linux_ppl_path`: target path where Linux packaging installs Linux-built PPL.
-- `vipm_project_path`: path to `.vipb` (or path accepted by `vipm build`).
-- `vipm_cli_url` + `vipm_cli_sha256`: optional VIPM CLI archive source/checksum used when workflow must build `linux_labview_image` locally.
-- `vipm_cli_archive_type`: archive type for `vipm_cli_url` (`tar.gz`/`tgz`/`zip`; default `tar.gz`).
-- `labview_community_edition`: enables LabVIEW Community Edition mode in Linux container runs (default `true`).
-
-### Typical dispatch values
-- `windows_labview_image`: `nationalinstruments/labview:2026q1-windows`
-- `linux_labview_image`: `nationalinstruments/labview:2026q1-linux-pwsh`
-- `consumer_repo`: `svelderrainruiz/labview-icon-editor`
-- `consumer_ref`: `develop` (or release branch/SHA)
-- `windows_build_command`: `` (empty => auto build command)
-- `windows_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_ppl_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_ppl_target_path`: `consumer/resource/plugins/lv_icon.lvlibp`
-- `linux_consume_linux_ppl_path`: `consumer/resource/plugins/lv_icon.linux.lvlibp`
-- `vipm_project_path`: `consumer/Tooling/deployment/NI Icon editor.vipb`
-- `labview_version`: `2026`
-- `bitness`: `64`
-
-### Notes
-- If your Windows host only supports Docker Linux containers, set `ppl_build_lane=linux-container` (default).
-- Workflow runs `build-ppl-windows` and `build-ppl-linux` in parallel, then packages using both consumed bundles (release-prep alignment).
-- Linux stage fails fast if `vipm` is not available in the selected Linux image.
-- If `vipm_community_edition=true`, Linux stage runs `vipm activate` before `vipm build`.
-- Local fast-triage helper for the Linux packaging step:
-  - `pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-PackageVipLinuxLocal.ps1`
-  - Optional overrides: `-LinuxLabviewImage`, `-ConsumerPath`, `-VipmProjectPath`, `-VipmCommunityEdition:$false`
 
 ## Autonomous CI loop
 - Continuous autonomous branch integration helper:
@@ -147,3 +224,4 @@ Installer contract:
 - Behavior:
   - `auto`: tries `runner-cli` (if present), then `gh`, then REST API token fallback.
   - `runner-cli`/`gh`/`rest`: force a specific backend and fail fast if unavailable.
+

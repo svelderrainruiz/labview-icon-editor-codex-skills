@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "lv2026",
+      "display_name": "LabVIEW 2026",
+      "lvversion": "26.0",
+      "supported_bitness": [
+        "32",
+        "64"
+      ],
+      "default": true,
+      "status": "active"
+    }
+  ]
+}

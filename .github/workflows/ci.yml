@@ -1,0 +1,1839 @@
+name: CI Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      source_project_repo:
+        description: 'Source project repository to build against'
+        required: false
+        default: 'svelderrainruiz/labview-icon-editor'
+        type: string
+      source_project_ref:
+        description: 'Source project ref to check out'
+        required: false
+        default: 'patch/456-2020-migration-branch-from-9e46ecf'
+        type: string
+      source_project_sha:
+        description: 'Expected source project commit SHA'
+        required: false
+        default: '9e46ecf591bc36afca8ddf4ce688a5f58604a12a'
+        type: string
+      labview_profile:
+        description: 'LabVIEW target preset id from profiles/labview/profiles.json'
+        required: false
+        default: 'lv2026'
+        type: string
+      source_labview_version_override:
+        description: 'Optional effective source project .lvversion override (major.minor, minimum 20.0)'
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: 'Run optional non-gating LV2020 x64 edge smoke diagnostics'
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      labview_profile:
+        description: 'LabVIEW target preset id from profiles/labview/profiles.json'
+        required: false
+        default: 'lv2026'
+        type: string
+      source_labview_version_override:
+        description: 'Optional effective source project .lvversion override (major.minor, minimum 20.0)'
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: 'Run optional non-gating LV2020 x64 edge smoke diagnostics'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  CONSUMER_REPO: ${{ inputs.source_project_repo || 'svelderrainruiz/labview-icon-editor' }}
+  CONSUMER_REF: ${{ inputs.source_project_ref || 'patch/456-2020-migration-branch-from-9e46ecf' }}
+  CONSUMER_EXPECTED_SHA: ${{ inputs.source_project_sha || '9e46ecf591bc36afca8ddf4ce688a5f58604a12a' }}
+  WINDOWS_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-windows
+  LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
+  WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
+  LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
+  VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
+  LABVIEW_PROFILES_ROOT: profiles/labview
+  DEFAULT_LABVIEW_PROFILE: ${{ inputs.labview_profile || 'lv2026' }}
+  SOURCE_LVVERSION_OVERRIDE: ${{ inputs.source_labview_version_override || '' }}
+  RUN_LV2020_EDGE_SMOKE: ${{ inputs.run_lv2020_edge_smoke || 'false' }}
+  LABVIEW_VERSION: '2026'
+  BITNESS: '64'
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run contract tests in Docker
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
+            -DockerImage 'mcr.microsoft.com/powershell:7.4-ubuntu-22.04' `
+            -TestPath './tests/*.Tests.ps1'
+
+      - name: Build NI image with PowerShell and pinned Pester
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t "$LINUX_LABVIEW_IMAGE" -f docker/ni-lv-pwsh.Dockerfile .
+
+      - name: Run VIPM activation contract tests on NI image
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Invoke-DockerContractCI.ps1 `
+            -DockerImage $env:LINUX_LABVIEW_IMAGE `
+            -TestPath './tests/VipmCliActivationContract.Tests.ps1'
+
+  run-lunit-smoke-lv2020x64:
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
+    needs: [contract-tests, resolve-labview-profile]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-lunit'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Run native LabVIEW LUnit smoke (x64, source-version target)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-LunitSmokeLv2020.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -TargetLabVIEWVersion ${{ needs.resolve-labview-profile.outputs.effective_labview_year }} `
+            -RequiredBitness '64' `
+            -OutputDirectory $outputDirectory `
+            -OverrideLvversion '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}' `
+            -EnforceLabVIEWProcessIsolation
+
+      - name: Publish LabVIEW 2020 LUnit smoke summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020'
+          $statusPath = Join-Path $outputDirectory 'lunit-smoke.status.json'
+          $resultPath = Join-Path $outputDirectory 'lunit-smoke.result.json'
+          $targetLabVIEWVersion = '${{ needs.resolve-labview-profile.outputs.effective_labview_year }}'
+          $effectiveLvversionRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $observedSourceLvversionRaw = '${{ needs.resolve-labview-profile.outputs.observed_source_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+          $reportPath = Join-Path $outputDirectory ("reports/lunit-report-lv{0}-x64.xml" -f $targetLabVIEWVersion)
+          $artifactName = "docker-contract-lunit-smoke-lv2020-$env:GITHUB_RUN_ID"
+
+          $status = 'unknown'
+          $reason = ''
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          $failedCount = ''
+          $validationOutcome = ''
+          $controlProbeStatus = ''
+          $controlProbeReason = ''
+          $controlProbeValidation = ''
+          $controlProbeRunExit = ''
+          $controlProbeReportPath = Join-Path $outputDirectory 'reports/lunit-report-lv2026-x64-control.xml'
+          $controlProbeActiveProcesses = ''
+          $advisoryType = ''
+          $advisoryMessage = ''
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.failed) {
+                $failedCount = [string]$resultPayload.report.failed
+              }
+              if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.validation_outcome) {
+                $validationOutcome = [string]$resultPayload.report.validation_outcome
+              }
+              if ($null -ne $resultPayload.report -and $null -ne $resultPayload.report.path -and -not [string]::IsNullOrWhiteSpace([string]$resultPayload.report.path)) {
+                $reportPath = [string]$resultPayload.report.path
+              }
+              if ($null -ne $resultPayload.control_probe) {
+                $controlProbeStatus = [string]$resultPayload.control_probe.status
+                $controlProbeReason = [string]$resultPayload.control_probe.reason
+                $controlProbeValidation = [string]$resultPayload.control_probe.validation_outcome
+                if ($null -ne $resultPayload.control_probe.run_exit_code) {
+                  $controlProbeRunExit = [string]$resultPayload.control_probe.run_exit_code
+                }
+                if ($null -ne $resultPayload.control_probe.report_path -and -not [string]::IsNullOrWhiteSpace([string]$resultPayload.control_probe.report_path)) {
+                  $controlProbeReportPath = [string]$resultPayload.control_probe.report_path
+                }
+                if ($null -ne $resultPayload.control_probe.active_labview_processes) {
+                  $controlProbeActiveProcesses = (@($resultPayload.control_probe.active_labview_processes) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ', '
+                }
+              }
+              if ($null -ne $resultPayload.advisory) {
+                $advisoryType = [string]$resultPayload.advisory.type
+                $advisoryMessage = [string]$resultPayload.advisory.message
+              }
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          $summary = @(
+            '## LabVIEW LUnit Smoke (x64)'
+            ''
+            ("- Status: {0}" -f $status)
+            ("- Effective LabVIEW version: {0}" -f $targetLabVIEWVersion)
+            ("- Effective .lvversion: {0}" -f $effectiveLvversionRaw)
+            ("- Observed source .lvversion: {0}" -f $observedSourceLvversionRaw)
+            ("- Override active: {0}" -f $overrideActive)
+            '- Bitness: 64'
+            ("- Primary report path: {0}" -f $reportPath)
+            ("- Artifact: {0}" -f $artifactName)
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($validationOutcome)) {
+            $summary += ("- LV2020 validation outcome: {0}" -f $validationOutcome)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($failedCount)) {
+            $summary += ("- Failed test cases: {0}" -f $failedCount)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($reason)) {
+            $summary += ("- Reason: {0}" -f $reason.Replace("`r", ' ').Replace("`n", ' '))
+          }
+          if (-not [string]::IsNullOrWhiteSpace($advisoryType)) {
+            $summary += ("- Advisory type: {0}" -f $advisoryType)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($advisoryMessage)) {
+            $summary += ("- Advisory: {0}" -f $advisoryMessage.Replace("`r", ' ').Replace("`n", ' '))
+          }
+          $controlProbeWasRelevant = (
+            (-not [string]::IsNullOrWhiteSpace($controlProbeStatus) -and $controlProbeStatus -ne 'not_run') -or
+            (-not [string]::IsNullOrWhiteSpace($controlProbeReason) -and $controlProbeReason -ne 'not_triggered')
+          )
+          if ($controlProbeWasRelevant) {
+            $summary += ''
+            $summary += '### LV2026 Comparative Control Probe (diagnostic only)'
+            $summary += ("- Status: {0}" -f $controlProbeStatus)
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeValidation)) {
+              $summary += ("- Validation outcome: {0}" -f $controlProbeValidation)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeRunExit)) {
+              $summary += ("- Run exit code: {0}" -f $controlProbeRunExit)
+            }
+            $summary += ("- Report path: {0}" -f $controlProbeReportPath)
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeReason) -and $controlProbeReason -ne 'control_probe_passed') {
+              $summary += ("- Reason: {0}" -f $controlProbeReason.Replace("`r", ' ').Replace("`n", ' '))
+            }
+            if (-not [string]::IsNullOrWhiteSpace($controlProbeActiveProcesses)) {
+              $summary += ("- Active LabVIEW processes at probe decision time: {0}" -f $controlProbeActiveProcesses)
+            }
+            if ($controlProbeStatus -eq 'passed' -and $status -ne 'passed') {
+              $summary += '- Interpretation: LV2026 control probe passed; LV2020 failure is likely LV2020-specific compatibility/discovery.'
+            }
+          }
+
+          $summary -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload LabVIEW 2020 LUnit smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-lunit-smoke-lv2020-${{ github.run_id }}
+          path: ${{ runner.temp }}/lunit-smoke-lv2020
+          if-no-files-found: error
+
+  run-lunit-smoke-lv2020x64-edge:
+    if: ${{ inputs.run_lv2020_edge_smoke == true || inputs.run_lv2020_edge_smoke == 'true' }}
+    runs-on:
+      - self-hosted
+      - windows
+      - self-hosted-windows-lv2020x64
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-lunit-edge'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+      - name: Run optional LV2020 x64 edge smoke (non-gating)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'lunit-smoke-lv2020-edge'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-LunitSmokeLv2020.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -TargetLabVIEWVersion 2020 `
+            -RequiredBitness '64' `
+            -OutputDirectory $outputDirectory `
+            -OverrideLvversion '20.0' `
+            -EnforceLabVIEWProcessIsolation `
+            -AllowNoTestcasesWhenControlProbePasses
+
+      - name: Upload optional LV2020 x64 edge smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-lunit-smoke-lv2020-edge-${{ github.run_id }}
+          path: ${{ runner.temp }}/lunit-smoke-lv2020-edge
+          if-no-files-found: error
+
+  build-x64-ppl-windows:
+    runs-on: windows-latest
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Validate Windows container parity assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredParityScript = Join-Path $consumerRoot 'Tooling/container-parity/runlabview-windows.ps1'
+          if (-not (Test-Path -LiteralPath $requiredParityScript -PathType Leaf)) {
+            throw "Missing required source project script '$requiredParityScript'."
+          }
+
+          $projectCandidates = @(Get-ChildItem -Path $consumerRoot -Recurse -File -Filter 'lv_icon_editor.lvproj')
+          if ($projectCandidates.Count -eq 0) {
+            throw "Unable to locate 'lv_icon_editor.lvproj' under '$consumerRoot'."
+          }
+          if ($projectCandidates.Count -gt 1) {
+            $candidateList = ($projectCandidates | ForEach-Object { $_.FullName }) -join '; '
+            throw "Expected exactly one 'lv_icon_editor.lvproj' under '$consumerRoot', found $($projectCandidates.Count): $candidateList"
+          }
+
+          $projectPath = $projectCandidates[0].FullName
+          $projectDirectory = Split-Path -Path $projectPath -Parent
+          $lvversionPath = Join-Path $projectDirectory '.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Missing '.lvversion' alongside 'lv_icon_editor.lvproj'. Expected: '$lvversionPath'."
+          }
+
+          $lvversionRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          if ($lvversionRaw -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw ".lvversion value '$lvversionRaw' is invalid. Expected numeric major.minor format (for example '26.0')."
+          }
+          $lvMajor = [int]$Matches['major']
+          if ($lvMajor -lt 20) {
+            throw ".lvversion '$lvversionRaw' is unsupported. Minimum supported LabVIEW version is 20.0."
+          }
+
+          $projectRelativePath = [System.IO.Path]::GetRelativePath($consumerRoot, $projectPath).Replace('\', '/')
+          $projectRelativePathWindows = $projectRelativePath -replace '/', '\'
+          $projectContainerPath = "C:\workspace\$projectRelativePathWindows"
+
+          "WINDOWS_PROJECT_RELATIVE_PATH=$projectRelativePathWindows" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_PROJECT_CONTAINER_PATH=$projectContainerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Resolved Windows parity project path: $projectRelativePathWindows"
+          Write-Host "Validated .lvversion at: $lvversionPath"
+
+      - name: Build Windows x64 PPL in NI Windows container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $projectRelativePath = [string]$env:WINDOWS_PROJECT_RELATIVE_PATH
+          $projectContainerPath = [string]$env:WINDOWS_PROJECT_CONTAINER_PATH
+          if ([string]::IsNullOrWhiteSpace($projectRelativePath) -or [string]::IsNullOrWhiteSpace($projectContainerPath)) {
+            throw "Missing Windows project path environment from validation step. Expected WINDOWS_PROJECT_RELATIVE_PATH and WINDOWS_PROJECT_CONTAINER_PATH."
+          }
+          $windowsPplTargetRelativePath = $env:WINDOWS_PPL_OUTPUT_PATH
+          if ($windowsPplTargetRelativePath.StartsWith('consumer/')) {
+            $windowsPplTargetRelativePath = $windowsPplTargetRelativePath.Substring('consumer/'.Length)
+          }
+          $windowsPplTargetRelativePath = $windowsPplTargetRelativePath -replace '/', '\'
+          $windowsPplBuildRelativePath = 'resource\plugins\lv_icon.lvlibp'
+
+          docker image inspect "$env:WINDOWS_LABVIEW_IMAGE" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            docker pull "$env:WINDOWS_LABVIEW_IMAGE"
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to pull/access Windows LabVIEW image '$env:WINDOWS_LABVIEW_IMAGE'. Ensure the image exists and runner authentication is configured."
+          }
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          docker run --rm `
+            -v "${consumerWorkspace}:C:\workspace" `
+            -e LVIE_REPO_ROOT=C:\workspace `
+            -e WORKSPACE_ROOT=C:\workspace `
+            -e REPO_ROOT=C:\workspace `
+            -e "LVIE_PROJECT_RELATIVE_PATH=$projectRelativePath" `
+            -e "PROJECT_PATH_REL=$projectRelativePath" `
+            -e "LVIE_PROJECT_PATH=$projectContainerPath" `
+            -e "PROJECT_PATH=$projectContainerPath" `
+            -e "TARGET_DIR_REL=Test\Templates" `
+            -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+            -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+            -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+            -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$windowsPplBuildRelativePath" `
+            -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
+            "$env:WINDOWS_LABVIEW_IMAGE" `
+            powershell -NoProfile -ExecutionPolicy Bypass -File C:\workspace\Tooling\container-parity\runlabview-windows.ps1
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+          $builtPplPath = Join-Path $consumerWorkspace ($windowsPplBuildRelativePath -replace '\\', '/')
+          if (-not (Test-Path -LiteralPath $builtPplPath -PathType Leaf)) {
+            throw "Windows build output not found at '$builtPplPath'."
+          }
+
+          $targetPplPath = Join-Path $consumerWorkspace ($windowsPplTargetRelativePath -replace '\\', '/')
+          if (-not ($builtPplPath.Equals($targetPplPath, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $targetDirectory = Split-Path -Path $targetPplPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($targetDirectory) -and -not (Test-Path -LiteralPath $targetDirectory -PathType Container)) {
+              New-Item -Path $targetDirectory -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $builtPplPath -Destination $targetPplPath -Force
+            Write-Host "Copied Windows PPL build output to expected bundle path: $targetPplPath"
+          }
+
+      - name: Create Windows x64 PPL bundle manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE $env:WINDOWS_PPL_OUTPUT_PATH
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Windows PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion $env:LABVIEW_VERSION `
+            -Bitness $env:BITNESS `
+            -WindowsImage $env:WINDOWS_LABVIEW_IMAGE `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+      - name: Upload Windows raw x64 PPL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-windows-raw-x64-${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ env.WINDOWS_PPL_OUTPUT_PATH }}
+          if-no-files-found: error
+
+      - name: Upload Windows x64 PPL bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-windows-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+          if-no-files-found: error
+
+  build-x64-ppl-linux:
+    runs-on: ubuntu-latest
+    needs: [contract-tests, build-x64-ppl-windows]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Validate Linux container parity assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/consumer/Tooling/container-parity"
+          run_script="$root/runlabview-linux.sh"
+          dev_script="$root/devmode-linux.sh"
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer repo:" >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+            ls -la "$GITHUB_WORKSPACE/consumer/Tooling" >&2 || true
+            exit 127
+          fi
+
+      - name: Ensure NI Linux image availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "$LINUX_LABVIEW_IMAGE" >/dev/null 2>&1; then
+            if ! docker pull "$LINUX_LABVIEW_IMAGE"; then
+              dockerfile_path="$GITHUB_WORKSPACE/docker/ni-lv-pwsh.Dockerfile"
+              if [[ -f "$dockerfile_path" ]]; then
+                echo "Preflight: pull failed; attempting local build from '$dockerfile_path'" >&2
+                docker build -t "$LINUX_LABVIEW_IMAGE" -f "$dockerfile_path" "$GITHUB_WORKSPACE"
+              else
+                echo "Unable to pull Linux image and local Dockerfile not found: $LINUX_LABVIEW_IMAGE" >&2
+                exit 1
+              fi
+            fi
+          fi
+
+      - name: Build Linux x64 PPL in NI Linux container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $linuxPplTargetRelativePath = $env:LINUX_PPL_OUTPUT_PATH
+          if ($linuxPplTargetRelativePath.StartsWith('consumer/')) {
+            $linuxPplTargetRelativePath = $linuxPplTargetRelativePath.Substring('consumer/'.Length)
+          }
+          $linuxPplTargetRelativePath = $linuxPplTargetRelativePath -replace '\\', '/'
+          $linuxPplBuildRelativePath = 'resource/plugins/lv_icon.lvlibp'
+
+          $consumerWorkspace = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $linuxContainerParityCommand = @'
+          set -euo pipefail
+          script_dir=/workspace/Tooling/container-parity
+          run_script="$script_dir/runlabview-linux.sh"
+          dev_script="$script_dir/devmode-linux.sh"
+          if [[ ! -f "$run_script" || ! -f "$dev_script" ]]; then
+            echo "Missing required container parity scripts in consumer repo:" >&2
+            echo "  expected: $run_script" >&2
+            echo "  expected: $dev_script" >&2
+            echo "Tip: ensure consumer_ref includes Tooling/container-parity assets." >&2
+            ls -la /workspace/Tooling >&2 || true
+            exit 127
+          fi
+          tmp_script_dir="$(mktemp -d)"
+          cleanup() { rm -rf "$tmp_script_dir"; }
+          trap cleanup EXIT
+          cp -a "$script_dir/." "$tmp_script_dir/"
+          while IFS= read -r -d '' script_file; do
+            sed -i 's/\r$//' "$script_file"
+          done < <(find "$tmp_script_dir" -type f -name '*.sh' -print0)
+          chmod +x "$tmp_script_dir/runlabview-linux.sh" "$tmp_script_dir/devmode-linux.sh"
+          "$tmp_script_dir/runlabview-linux.sh"
+          '@
+
+          docker run --rm `
+            -v "${consumerWorkspace}:/workspace" `
+            -w /workspace `
+            -e "LVIE_REPO_ROOT=/workspace" `
+            -e "WORKSPACE_ROOT=/workspace" `
+            -e "REPO_ROOT=/workspace" `
+            -e "LVIE_PROJECT_RELATIVE_PATH=lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH_REL=lv_icon_editor.lvproj" `
+            -e "LVIE_PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+            -e "PROJECT_PATH=/workspace/lv_icon_editor.lvproj" `
+            -e "TARGET_DIR_REL=Test/Templates" `
+            -e "CONTAINER_PARITY_EXCLUDE_FILES=Polymorphic Template.vi" `
+            -e "CONTAINER_PARITY_BUILD_SPEC=true" `
+            -e "CONTAINER_PARITY_BUILD_SPEC_NAME=Editor Packed Library" `
+            -e "CONTAINER_PARITY_TARGET_NAME=My Computer" `
+            -e "CONTAINER_PARITY_BUILD_OUTPUT_RELATIVE_PATH=$linuxPplBuildRelativePath" `
+            -e "CONTAINER_PARITY_LABVIEW_VERSION=$env:LABVIEW_VERSION" `
+            -e "LABVIEW_COMMUNITY_EDITION=true" `
+            "$env:LINUX_LABVIEW_IMAGE" `
+            bash -lc $linuxContainerParityCommand
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Linux PPL build command failed with exit code $LASTEXITCODE"
+          }
+
+          $builtPplPath = Join-Path $consumerWorkspace $linuxPplBuildRelativePath
+          if (-not (Test-Path -LiteralPath $builtPplPath -PathType Leaf)) {
+            throw "Linux build output not found at '$builtPplPath'."
+          }
+
+          $targetPplPath = Join-Path $consumerWorkspace $linuxPplTargetRelativePath
+          if (-not ($builtPplPath.Equals($targetPplPath, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $targetDirectory = Split-Path -Path $targetPplPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($targetDirectory) -and -not (Test-Path -LiteralPath $targetDirectory -PathType Container)) {
+              New-Item -Path $targetDirectory -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $builtPplPath -Destination $targetPplPath -Force
+            Write-Host "Copied Linux PPL build output to expected bundle path: $targetPplPath"
+          }
+
+      - name: Create Linux x64 PPL bundle manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pplPath = Join-Path $env:GITHUB_WORKSPACE $env:LINUX_PPL_OUTPUT_PATH
+          if (-not (Test-Path -LiteralPath $pplPath -PathType Leaf)) {
+            throw "Linux PPL output not found at '$pplPath'."
+          }
+
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/New-PplBundleManifest.ps1" `
+            -PplPath $pplPath `
+            -OutputDirectory $bundleDir `
+            -LabVIEWVersion $env:LABVIEW_VERSION `
+            -Bitness $env:BITNESS `
+            -WindowsImage $env:LINUX_LABVIEW_IMAGE `
+            -BuildRunId "$env:GITHUB_RUN_ID" `
+            -BuildRunAttempt "$env:GITHUB_RUN_ATTEMPT"
+
+      - name: Upload Linux raw x64 PPL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-linux-raw-x64-${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ env.LINUX_PPL_OUTPUT_PATH }}
+          if-no-files-found: error
+
+      - name: Upload Linux x64 PPL bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-linux-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-linux
+          if-no-files-found: error
+
+  gather-release-notes:
+    runs-on: ubuntu-latest
+    needs: [contract-tests]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Gather release notes artifact content
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseNotesBundleDir = Join-Path $env:RUNNER_TEMP 'release-notes-prepared'
+          if (Test-Path -LiteralPath $releaseNotesBundleDir) {
+            Remove-Item -LiteralPath $releaseNotesBundleDir -Recurse -Force
+          }
+          New-Item -Path $releaseNotesBundleDir -ItemType Directory -Force | Out-Null
+
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          }
+          $bundleReleaseNotesPath = Join-Path $releaseNotesBundleDir 'release_notes.md'
+          Copy-Item -LiteralPath $releaseNotesPath -Destination $bundleReleaseNotesPath -Force
+
+          $item = Get-Item -LiteralPath $bundleReleaseNotesPath
+          $sha = (Get-FileHash -LiteralPath $bundleReleaseNotesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [pscustomobject]@{
+            generated_utc = (Get-Date).ToUniversalTime().ToString('o')
+            source_sha = $env:GITHUB_SHA
+            source_repository = $env:GITHUB_REPOSITORY
+            file_name = 'release_notes.md'
+            sha256 = $sha
+            size_bytes = [int64]$item.Length
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $releaseNotesBundleDir 'release-notes-manifest.json') -Encoding UTF8
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-release-notes-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-notes-prepared
+          if-no-files-found: error
+
+  resolve-labview-profile:
+    runs-on: ubuntu-latest
+    needs: [contract-tests]
+    outputs:
+      source_labview_year: ${{ steps.source-labels.outputs.source_labview_year }}
+      source_runner_label_x86: ${{ steps.source-labels.outputs.source_runner_label_x86 }}
+      source_runner_label_x64: ${{ steps.source-labels.outputs.source_runner_label_x64 }}
+      effective_lvversion_raw: ${{ steps.source-labels.outputs.effective_lvversion_raw }}
+      effective_labview_year: ${{ steps.source-labels.outputs.effective_labview_year }}
+      observed_source_lvversion_raw: ${{ steps.source-labels.outputs.observed_source_lvversion_raw }}
+      override_active: ${{ steps.source-labels.outputs.override_active }}
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - id: select-profile
+        name: Resolve selected LabVIEW target preset id
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profileId = '${{ inputs.labview_profile }}'
+          if ([string]::IsNullOrWhiteSpace($profileId)) {
+            $profileId = $env:DEFAULT_LABVIEW_PROFILE
+          }
+          if ([string]::IsNullOrWhiteSpace($profileId)) {
+            throw 'Selected LabVIEW target preset id is empty.'
+          }
+          "profile_id=$profileId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Selected LabVIEW target preset id: $profileId"
+
+      - name: Resolve LabVIEW target preset advisory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Resolve-LabviewProfile.ps1" `
+            -ProfilesRoot (Join-Path $env:GITHUB_WORKSPACE $env:LABVIEW_PROFILES_ROOT) `
+            -ProfileId '${{ steps.select-profile.outputs.profile_id }}' `
+            -ConsumerRepoRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -SupportedBitness '64' `
+            -OutputPath (Join-Path $bundleDir 'profile-resolution.json')
+
+      - id: source-labels
+        name: Resolve source project runner labels from .lvversion
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
+          if (-not (Test-Path -LiteralPath $resolutionPath -PathType Leaf)) {
+            throw "Target preset resolution output missing: $resolutionPath"
+          }
+
+          $resolution = Get-Content -LiteralPath $resolutionPath -Raw | ConvertFrom-Json
+          $observedRawValue = [string]$resolution.consumer.lvversion_raw
+          if ([string]::IsNullOrWhiteSpace($observedRawValue)) {
+            throw "Unable to resolve observed source project .lvversion from profile resolution payload."
+          }
+          if ($observedRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw "Observed source project .lvversion '$observedRawValue' is invalid. Expected numeric major.minor format."
+          }
+
+          $overrideRawValue = [string]$env:SOURCE_LVVERSION_OVERRIDE
+          $overrideActive = $false
+          $effectiveRawValue = $observedRawValue
+
+          if (-not [string]::IsNullOrWhiteSpace($overrideRawValue)) {
+            $overrideRawValue = $overrideRawValue.Trim()
+            if ($overrideRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+              throw "source_labview_version_override '$overrideRawValue' is invalid. Expected numeric major.minor format."
+            }
+            $overrideMajor = [int]$Matches['major']
+            if ($overrideMajor -lt 20) {
+              throw "source_labview_version_override '$overrideRawValue' is unsupported. Minimum supported LabVIEW version is 20.0."
+            }
+            $effectiveRawValue = $overrideRawValue
+            $overrideActive = $true
+          }
+
+          if ($effectiveRawValue -notmatch '^(?<major>\d+)\.(?<minor>\d+)$') {
+            throw "Effective source project .lvversion '$effectiveRawValue' is invalid. Expected numeric major.minor format."
+          }
+          $effectiveMajor = [int]$Matches['major']
+          if ($effectiveMajor -lt 20) {
+            throw "Effective source project .lvversion '$effectiveRawValue' is unsupported. Minimum supported LabVIEW version is 20.0."
+          }
+          $yearValue = [string](2000 + $effectiveMajor)
+
+          $labelX86 = "self-hosted-windows-lv${yearValue}x86"
+          $labelX64 = "self-hosted-windows-lv${yearValue}x64"
+
+          "source_labview_year=$yearValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "source_runner_label_x86=$labelX86" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "source_runner_label_x64=$labelX64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "effective_lvversion_raw=$effectiveRawValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "effective_labview_year=$yearValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "observed_source_lvversion_raw=$observedRawValue" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "override_active=$($overrideActive.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          if ($overrideActive -and ($effectiveRawValue -ne $observedRawValue)) {
+            Write-Host ("::warning title=Source project LabVIEW override active::source_labview_version_override '{0}' overrides observed source project .lvversion '{1}'." -f $effectiveRawValue, $observedRawValue)
+          }
+
+          Write-Host "Resolved effective source project .lvversion: $effectiveRawValue"
+          Write-Host "Resolved effective source project LabVIEW year: $yearValue"
+          Write-Host "Resolved observed source project .lvversion: $observedRawValue"
+          Write-Host "Resolved x86 runner label: $labelX86"
+          Write-Host "Resolved x64 runner label: $labelX64"
+
+      - name: Publish LabVIEW target preset advisory summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
+          if (-not (Test-Path -LiteralPath $resolutionPath -PathType Leaf)) {
+            throw "Target preset resolution output missing: $resolutionPath"
+          }
+
+          $resolution = Get-Content -LiteralPath $resolutionPath -Raw | ConvertFrom-Json
+          $comparison = [string]$resolution.comparison_result
+          $message = [string]$resolution.warning_message
+          $profileTarget = [string]$resolution.profile.expected_vipb_target
+          $consumerTarget = [string]$resolution.consumer.expected_vipb_target
+          $profileId = [string]$resolution.selected_profile_id
+          $observedLvversionRaw = '${{ steps.source-labels.outputs.observed_source_lvversion_raw }}'
+          $effectiveLvversionRaw = '${{ steps.source-labels.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ steps.source-labels.outputs.override_active }}'
+          $effectiveYear = '${{ steps.source-labels.outputs.effective_labview_year }}'
+
+          if ($comparison -eq 'mismatch') {
+            if ([string]::IsNullOrWhiteSpace($message)) {
+              $message = "Selected target preset '$profileId' differs from source project target. Source project remains authoritative."
+            }
+            Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $message)
+          }
+          if ($overrideActive -eq 'true' -and $effectiveLvversionRaw -ne $observedLvversionRaw) {
+            Write-Host ("::warning title=Source project LabVIEW override active::Effective .lvversion '{0}' overrides observed source project .lvversion '{1}'." -f $effectiveLvversionRaw, $observedLvversionRaw)
+          }
+
+          @(
+            '## LabVIEW Target Preset Advisory'
+            ''
+            ('- Selected target preset: `{0}`' -f $profileId)
+            ('- Comparison result: `{0}`' -f $comparison)
+            ('- Target preset expected VIPB target: `{0}`' -f $profileTarget)
+            ('- Source project expected VIPB target: `{0}`' -f $consumerTarget)
+            ('- Source project observed .lvversion: `{0}`' -f $observedLvversionRaw)
+            ('- Effective .lvversion: `{0}`' -f $effectiveLvversionRaw)
+            ('- Override active: `{0}`' -f $overrideActive)
+            ('- Effective source project LabVIEW year: `{0}`' -f $effectiveYear)
+            ('- Source project x86 runner label: `{0}`' -f '${{ steps.source-labels.outputs.source_runner_label_x86 }}')
+            '- Source project remains authoritative for VIPB target enforcement.'
+            '- Artifact: `docker-contract-labview-profile-resolution-${{ github.run_id }}`'
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload LabVIEW profile resolution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-labview-profile-resolution-${{ github.run_id }}
+          path: ${{ runner.temp }}/labview-profile-resolution
+          if-no-files-found: error
+
+  prepare-vipb-linux:
+    runs-on: ubuntu-latest
+    needs: [contract-tests, gather-release-notes, resolve-labview-profile]
+    env:
+      VERSION_MAJOR: '0'
+      VERSION_MINOR: '1'
+      VERSION_PATCH: '0'
+      VERSION_BUILD: '${{ github.run_number }}'
+      VERSION_COMMIT: '${{ github.sha }}'
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Apply effective .lvversion for VIPB prep
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (VIPB prep)'
+            ''
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - id: labview-version
+        name: Resolve LabVIEW version from source project repo
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $versionHelper = Join-Path $consumerRoot 'Tooling/support/LabVIEWVersion.ps1'
+          . $versionHelper
+          $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
+          "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host ("Resolved LabVIEW version from source project .lvversion: {0}" -f $lvInfo.Raw)
+
+      - name: Download release notes artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-release-notes-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-notes-prepared
+
+      - name: Download LabVIEW target preset resolution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-labview-profile-resolution-${{ github.run_id }}
+          path: ${{ runner.temp }}/labview-profile-resolution
+
+      - name: Install gathered release notes for VIPB preparation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceReleaseNotesPath = Join-Path $env:RUNNER_TEMP 'release-notes-prepared/release_notes.md'
+          if (-not (Test-Path -LiteralPath $sourceReleaseNotesPath -PathType Leaf)) {
+            throw "Gathered release notes artifact is missing '$sourceReleaseNotesPath'."
+          }
+          $targetReleaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          Copy-Item -LiteralPath $sourceReleaseNotesPath -Destination $targetReleaseNotesPath -Force
+
+      - id: display-info
+        name: Generate VIP display information JSON
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $profileResolutionPath = Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json'
+          if (-not (Test-Path -LiteralPath $profileResolutionPath -PathType Leaf)) {
+            throw "LabVIEW target preset resolution file not found: $profileResolutionPath"
+          }
+          $profileResolution = Get-Content -LiteralPath $profileResolutionPath -Raw | ConvertFrom-Json
+          $comparison = [string]$profileResolution.comparison_result
+          if ($comparison -eq 'mismatch') {
+            $warningMessage = [string]$profileResolution.warning_message
+            if ([string]::IsNullOrWhiteSpace($warningMessage)) {
+              $warningMessage = 'Selected LabVIEW target preset differs from source project target. Source project remains authoritative.'
+            }
+            Write-Host ("::warning title=LabVIEW target preset advisory mismatch::{0}" -f $warningMessage)
+          }
+
+          $overlayData = $null
+          if ($null -ne $profileResolution.profile -and $null -ne $profileResolution.profile.overlay_data) {
+            $overlayData = $profileResolution.profile.overlay_data
+          }
+
+          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
+          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
+            Get-Content -Raw -Path $releaseNotesPath
+          } else {
+            ''
+          }
+
+          $info = @{
+            "Package Version" = @{
+              "major" = [int]$env:VERSION_MAJOR
+              "minor" = [int]$env:VERSION_MINOR
+              "patch" = [int]$env:VERSION_PATCH
+              "build" = [int]$env:VERSION_BUILD
+            }
+            "Product Name" = "labview-icon-editor"
+            "Company Name" = "${{ github.repository_owner }}"
+            "Author Name (Person or Company)" = "${{ github.repository }}"
+            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
+            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
+            "Product Description Summary" = "labview-icon-editor VI Package build."
+            "Product Description" = "labview-icon-editor VI Package build."
+            "Release Notes - Change Log" = $releaseNotes
+          }
+
+          if ($null -ne $overlayData) {
+            foreach ($property in $overlayData.PSObject.Properties) {
+              $key = [string]$property.Name
+              $overlayValue = $property.Value
+              if ([string]::IsNullOrWhiteSpace($key)) {
+                continue
+              }
+
+              if ($info.Contains($key)) {
+                $existingValue = $info[$key]
+                if ($null -ne $existingValue -and -not [string]::IsNullOrWhiteSpace([string]$existingValue)) {
+                  continue
+                }
+              }
+
+              $info[$key] = $overlayValue
+            }
+          }
+
+          $json = $info | ConvertTo-Json -Depth 6 -Compress
+          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: vipb_diag
+        name: Run VIPB diagnostics suite
+        continue-on-error: true
+        shell: pwsh
+        env:
+          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux'
+          if (Test-Path -LiteralPath $bundleDir) {
+            Remove-Item -LiteralPath $bundleDir -Recurse -Force
+          }
+          New-Item -Path $bundleDir -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PrepareVipbDiagnostics.ps1" `
+            -RepoRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -VipbPath (Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH) `
+            -ReleaseNotesFile (Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md') `
+            -DisplayInformationJson $env:DISPLAY_INFORMATION_JSON `
+            -LabVIEWVersionYear '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
+            -SupportedBitness '64' `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -OutputDirectory $bundleDir `
+            -SourceRepository '${{ github.repository }}' `
+            -SourceRef '${{ github.ref }}' `
+            -SourceSha '${{ github.sha }}' `
+            -BuildRunId '${{ github.run_id }}' `
+            -BuildRunAttempt '${{ github.run_attempt }}' `
+            -ProfileResolutionPath (Join-Path $env:RUNNER_TEMP 'labview-profile-resolution/profile-resolution.json') `
+            -UpdateScriptPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/Update-Vipb.DisplayInfo.ps1')
+
+      - name: Publish VIPB diagnostics summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/vipb-diagnostics-summary.md'
+          if (Test-Path -LiteralPath $summaryPath -PathType Leaf) {
+            Get-Content -LiteralPath $summaryPath -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            @(
+              ''
+              '- Artifact: `docker-contract-vipb-prepared-linux-${{ github.run_id }}`'
+              '- Source: `runner.temp/vipb-prepared-linux`'
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            @(
+              '## VIPB Diagnostics Suite'
+              ''
+              '- Status: failed (diagnostics summary not generated)'
+              '- Expected summary path: `' + $summaryPath + '`'
+              '- Expected artifact: `docker-contract-vipb-prepared-linux-${{ github.run_id }}`'
+              '- Source: `runner.temp/vipb-prepared-linux`'
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload prepared VIPB artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipb-prepared-linux-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipb-prepared-linux
+          if-no-files-found: error
+
+      - name: Fail if VIPB diagnostics suite failed
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleRoot = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux'
+          $statusPath = Join-Path $bundleRoot 'prepare-vipb.status.json'
+          $errorPath = Join-Path $bundleRoot 'prepare-vipb.error.json'
+          $diagnosticsPath = Join-Path $bundleRoot 'vipb-diagnostics.json'
+          $summaryPath = Join-Path $bundleRoot 'vipb-diagnostics-summary.md'
+          $logPath = Join-Path $bundleRoot 'prepare-vipb.log'
+          $artifactName = 'docker-contract-vipb-prepared-linux-${{ github.run_id }}'
+
+          function Try-ReadJsonFile {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              return $null
+            }
+
+            try {
+              return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            } catch {
+              Write-Warning ("Unable to parse {0} JSON at '{1}': {2}" -f $Label, $Path, $_.Exception.Message)
+              return $null
+            }
+          }
+
+          if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) {
+            throw "VIPB diagnostics status file missing: $statusPath"
+          }
+
+          $statusPayload = Try-ReadJsonFile -Path $statusPath -Label 'status payload'
+          if ($null -eq $statusPayload -or [string]::IsNullOrWhiteSpace([string]$statusPayload.status)) {
+            throw "VIPB diagnostics status payload missing or unparseable: $statusPath"
+          }
+
+          $status = [string]$statusPayload.status
+          if ($status -eq 'failed') {
+            $errorPayload = Try-ReadJsonFile -Path $errorPath -Label 'error payload'
+            $diagnosticsPayload = Try-ReadJsonFile -Path $diagnosticsPath -Label 'diagnostics payload'
+
+            $reason = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.message)) {
+              [string]$errorPayload.message
+            } elseif (Test-Path -LiteralPath $errorPath -PathType Leaf) {
+              'status failed but error payload missing/unparseable'
+            } else {
+              'status failed but error payload file is missing'
+            }
+            $errorType = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.type)) {
+              [string]$errorPayload.type
+            } else {
+              'unknown'
+            }
+            $authorityCheck = if ($null -ne $errorPayload -and -not [string]::IsNullOrWhiteSpace([string]$errorPayload.version_authority_check)) {
+              [string]$errorPayload.version_authority_check
+            } elseif ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.check_result)) {
+              [string]$diagnosticsPayload.version_authority.check_result
+            } else {
+              'unknown'
+            }
+            $expectedTarget = if ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.expected_vipb_target)) {
+              [string]$diagnosticsPayload.version_authority.expected_vipb_target
+            } else {
+              ''
+            }
+            $observedTarget = if ($null -ne $diagnosticsPayload -and $null -ne $diagnosticsPayload.version_authority -and -not [string]::IsNullOrWhiteSpace([string]$diagnosticsPayload.version_authority.observed_vipb_target)) {
+              [string]$diagnosticsPayload.version_authority.observed_vipb_target
+            } else {
+              ''
+            }
+
+            Write-Host ("::error title=VIPB diagnostics failed::{0}" -f $reason)
+            Write-Host '::group::VIPB diagnostics failure context'
+            Write-Host ("status={0}" -f $status)
+            Write-Host ("reason={0}" -f $reason)
+            Write-Host ("error_type={0}" -f $errorType)
+            Write-Host ("authority_check={0}" -f $authorityCheck)
+            if (-not [string]::IsNullOrWhiteSpace($expectedTarget)) {
+              Write-Host ("lvversion_expected_target={0}" -f $expectedTarget)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($observedTarget)) {
+              Write-Host ("vipb_observed_target={0}" -f $observedTarget)
+            }
+            Write-Host ("artifact={0}" -f $artifactName)
+            Write-Host ("status_path={0}" -f $statusPath)
+            Write-Host ("error_path={0}" -f $errorPath)
+            Write-Host ("diagnostics_path={0}" -f $diagnosticsPath)
+            Write-Host ("summary_path={0}" -f $summaryPath)
+            Write-Host ("log_path={0}" -f $logPath)
+            Write-Host '::endgroup::'
+
+            @(
+              '## VIPB Failure Gate'
+              ''
+              '- Status: `failed`'
+              ('- Reason: `{0}`' -f $reason)
+              ('- Error type: `{0}`' -f $errorType)
+              ('- Authority check: `{0}`' -f $authorityCheck)
+              ('- Artifact: `{0}`' -f $artifactName)
+              ('- Summary path: `{0}`' -f $summaryPath)
+              ('- Error payload path: `{0}`' -f $errorPath)
+              ('- Diagnostics path: `{0}`' -f $diagnosticsPath)
+              ('- Log path: `{0}`' -f $logPath)
+            ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+            throw "VIPB diagnostics failed: $reason. See '$summaryPath' and artifact '$artifactName'."
+          }
+
+          if ('${{ steps.vipb_diag.outcome }}' -eq 'failure') {
+            throw "VIPB diagnostics execution step failed despite non-failed status '$status'. Check '$summaryPath' and '$diagnosticsPath'."
+          }
+          Write-Host "VIPB diagnostics suite completed with status '$status'."
+
+  build-vip-self-hosted:
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
+    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-lv2020x64, resolve-labview-profile]
+    env:
+      VERSION_MAJOR: '0'
+      VERSION_MINOR: '1'
+      VERSION_PATCH: '0'
+      VERSION_BUILD: '${{ github.run_number }}'
+      VERSION_COMMIT: '${{ github.sha }}'
+      VIPM_TIMEOUT_SECONDS: '900'
+      LVIE_RUNNER_CLI_SKIP_BUILD: '1'
+      LVIE_RUNNER_CLI_SKIP_DOWNLOAD: '1'
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-build-vip'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Apply effective .lvversion for self-hosted build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (self-hosted build)'
+            ''
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Validate self-hosted native LabVIEW prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $requiredFiles = @(
+            'Tooling/Invoke-VipBuild.ps1',
+            '.github/actions/build-lvlibp/BuildProjectSpec.ps1',
+            '.github/actions/rename-file/Rename-file.ps1',
+            'Tooling/support/LabVIEWVersion.ps1',
+            'Tooling/deployment/NI Icon editor.vipb'
+          )
+          foreach ($relativePath in $requiredFiles) {
+            $fullPath = Join-Path $consumerRoot $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+              throw "Missing required source project asset '$fullPath'."
+            }
+          }
+          if (-not (Get-Command g-cli -ErrorAction SilentlyContinue)) {
+            throw "Required command 'g-cli' not found on PATH for self-hosted packaging lane."
+          }
+
+      - id: labview-version
+        name: Resolve LabVIEW version from source project repo
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $versionHelper = Join-Path $consumerRoot 'Tooling/support/LabVIEWVersion.ps1'
+          . $versionHelper
+          $lvInfo = Get-LabVIEWVersionInfo -RepoRoot $consumerRoot
+          "year=$($lvInfo.Year)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "minor=$($lvInfo.MinorRevision)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host ("Resolved LabVIEW version from source project .lvversion: {0}" -f $lvInfo.Raw)
+
+      - name: Bootstrap worktree guard context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $worktreeRoot = Join-Path $env:GITHUB_WORKSPACE 'worktrees'
+          if (-not (Test-Path -LiteralPath $worktreeRoot -PathType Container)) {
+            New-Item -Path $worktreeRoot -ItemType Directory -Force | Out-Null
+          }
+          "LVIE_WORKTREE_ROOT=$worktreeRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LVIE_SKIP_WORKTREE_ROOT_CHECK=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Exported LVIE_WORKTREE_ROOT=$worktreeRoot"
+
+      - name: Ensure release notes file exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/Tooling/deployment/release_notes.md'
+          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            New-Item -Path $releaseNotesPath -ItemType File -Force | Out-Null
+          }
+
+      - name: Download Windows x64 PPL bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-ppl-bundle-windows-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/ppl-bundle-windows
+
+      - name: Download prepared VIPB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-vipb-prepared-linux-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipb-prepared-linux
+
+      - name: Consume prepared VIPB from Linux artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceVipbPath = Join-Path $env:RUNNER_TEMP 'vipb-prepared-linux/NI Icon editor.vipb'
+          if (-not (Test-Path -LiteralPath $sourceVipbPath -PathType Leaf)) {
+            throw "Prepared VIPB artifact is missing '$sourceVipbPath'."
+          }
+
+          $targetVipbPath = Join-Path $env:GITHUB_WORKSPACE $env:VIPB_PROJECT_PATH
+          $targetVipbDirectory = Split-Path -Path $targetVipbPath -Parent
+          if (-not (Test-Path -LiteralPath $targetVipbDirectory -PathType Container)) {
+            New-Item -Path $targetVipbDirectory -ItemType Directory -Force | Out-Null
+          }
+          Copy-Item -LiteralPath $sourceVipbPath -Destination $targetVipbPath -Force
+          Write-Host "Using prepared VIPB from Linux artifact: $targetVipbPath"
+
+      - name: Consume Windows-built x64 PPL bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $env:RUNNER_TEMP 'ppl-bundle-windows'
+          $targetPplPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/resource/plugins/lv_icon_x64.lvlibp'
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-PplBundleConsume.ps1" `
+            -BundleDirectory $bundleDir `
+            -OutputPplPath $targetPplPath `
+            -ExpectedLabVIEWVersion $env:LABVIEW_VERSION `
+            -ExpectedBitness '64'
+
+      - name: Build native 32-bit PPL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -SupportedBitness 32 `
+            -RepoRoot "$consumerRoot" `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -SkipWorktreeRootCheck
+          & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
+            -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
+            -NewFilename "$consumerRoot/resource/plugins/lv_icon_x86.lvlibp"
+
+      - name: Validate consumed x64 and native x86 PPL outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $x64Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x64.lvlibp'
+          $x86Path = Join-Path $consumerRoot 'resource/plugins/lv_icon_x86.lvlibp'
+          if (-not (Test-Path -LiteralPath $x64Path -PathType Leaf)) {
+            throw "Consumed x64 PPL output not found at '$x64Path'."
+          }
+          if (-not (Test-Path -LiteralPath $x86Path -PathType Leaf)) {
+            throw "Native x86 PPL output not found at '$x86Path'."
+          }
+
+      - id: display-info
+        name: Generate VIP display information JSON
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
+          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
+            Get-Content -Raw -Path $releaseNotesPath
+          } else {
+            ''
+          }
+
+          $info = @{
+            "Package Version" = @{
+              "major" = [int]$env:VERSION_MAJOR
+              "minor" = [int]$env:VERSION_MINOR
+              "patch" = [int]$env:VERSION_PATCH
+              "build" = [int]$env:VERSION_BUILD
+            }
+            "Product Name" = "labview-icon-editor"
+            "Company Name" = "${{ github.repository_owner }}"
+            "Author Name (Person or Company)" = "${{ github.repository }}"
+            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
+            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
+            "Product Description Summary" = "labview-icon-editor VI Package build."
+            "Product Description" = "labview-icon-editor VI Package build."
+            "Release Notes - Change Log" = $releaseNotes
+          }
+
+          $json = $info | ConvertTo-Json -Depth 6 -Compress
+          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload consumed VIPB (post-mortem)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipb-modified-self-hosted-${{ github.run_id }}
+          path: ${{ env.VIPB_PROJECT_PATH }}
+          if-no-files-found: warn
+
+      - name: Build VI Package (LV 64-bit)
+        shell: pwsh
+        env:
+          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          & "$consumerRoot/Tooling/Invoke-VipBuild.ps1" `
+            -SupportedBitness 64 `
+            -RepoRoot "$consumerRoot" `
+            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
+            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
+            -Major $env:VERSION_MAJOR `
+            -Minor $env:VERSION_MINOR `
+            -Patch $env:VERSION_PATCH `
+            -Build $env:VERSION_BUILD `
+            -Commit $env:VERSION_COMMIT `
+            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
+            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON `
+            -VipmTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS
+
+      - id: locate-vip
+        name: Locate built VI package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
+          $vipCandidates = Get-ChildItem -Path $consumerRoot -Recurse -File -Filter '*.vip' |
+            Sort-Object LastWriteTimeUtc -Descending
+
+          if (-not $vipCandidates -or $vipCandidates.Count -eq 0) {
+            throw "No .vip artifact found under '$consumerRoot' after self-hosted native package build."
+          }
+
+          $vipFile = $vipCandidates[0]
+          "vip_file_path=$($vipFile.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_file_name=$($vipFile.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload self-hosted VI Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vip-package-self-hosted-${{ github.run_id }}
+          path: ${{ steps.locate-vip.outputs.vip_file_path }}
+          if-no-files-found: error
+
+  install-vip-x86-self-hosted:
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
+    needs: [build-vip-self-hosted, resolve-labview-profile]
+    steps:
+      - name: Checkout skill repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source project repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONSUMER_REPO }}
+          ref: ${{ env.CONSUMER_REF }}
+          path: consumer
+
+      - name: Verify checked out source project SHA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git -C consumer rev-parse HEAD).Trim()
+          if ($actualSha -ne $env:CONSUMER_EXPECTED_SHA) {
+            throw "Source project SHA mismatch. Expected '$env:CONSUMER_EXPECTED_SHA', got '$actualSha'."
+          }
+          Write-Host "Source project SHA verified: $actualSha"
+
+      - name: Assert source project remotes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'source-project-remotes-install-vip'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Assert-SourceProjectRemotes.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -UpstreamRepo $env:CONSUMER_REPO `
+            -OutputDirectory $outputDirectory
+
+          $resultPath = Join-Path $outputDirectory 'source-project-remotes.result.json'
+          if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Source project remote assertion result payload missing at '$resultPath'."
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          @(
+            '## Source Project Remotes'
+            ''
+            ("- Status: {0}" -f [string]$result.status)
+            ("- Upstream repo: {0}" -f [string]$result.upstream_repo)
+            ("- Upstream URL: {0}" -f [string]$result.upstream_url_after)
+            ("- Action: {0}" -f [string]$result.action_taken)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Download self-hosted VI Package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-contract-vip-package-self-hosted-${{ github.run_id }}
+          path: ${{ runner.temp }}/vip-artifact-self-hosted
+
+      - id: resolve-vip
+        name: Resolve VI Package artifact path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'vip-artifact-self-hosted'
+          $vipCandidates = @(Get-ChildItem -Path $artifactRoot -Recurse -File -Filter '*.vip')
+          if ($vipCandidates.Count -eq 0) {
+            throw "No .vip files found in downloaded artifact root '$artifactRoot'."
+          }
+          if ($vipCandidates.Count -gt 1) {
+            $candidateList = ($vipCandidates | ForEach-Object { $_.FullName }) -join '; '
+            throw "Expected exactly one .vip in downloaded artifact root '$artifactRoot', found $($vipCandidates.Count): $candidateList"
+          }
+
+          $vipPath = $vipCandidates[0].FullName
+          "vip_file_path=$vipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Resolved VIP artifact: $vipPath"
+
+      - name: Apply effective .lvversion for x86 install smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lvversionPath = Join-Path $env:GITHUB_WORKSPACE 'consumer/.lvversion'
+          if (-not (Test-Path -LiteralPath $lvversionPath -PathType Leaf)) {
+            throw "Source project .lvversion file not found at '$lvversionPath'."
+          }
+
+          $beforeRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          $effectiveRaw = '${{ needs.resolve-labview-profile.outputs.effective_lvversion_raw }}'
+          $overrideActive = '${{ needs.resolve-labview-profile.outputs.override_active }}'
+
+          if ($overrideActive -eq 'true' -and -not [string]::IsNullOrWhiteSpace($effectiveRaw)) {
+            Set-Content -LiteralPath $lvversionPath -Value $effectiveRaw -Encoding ASCII
+          }
+
+          $afterRaw = (Get-Content -LiteralPath $lvversionPath -Raw -ErrorAction Stop).Trim()
+          @(
+            '## Effective .lvversion (x86 install smoke)'
+            ''
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Run VIPM install smoke (x86, .lvversion-driven)
+        shell: pwsh
+        env:
+          RUNNER_LABEL_X86: ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'vipm-install-x86'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-VipmInstallSmoke.ps1" `
+            -SourceProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'consumer') `
+            -VipArtifactPath '${{ steps.resolve-vip.outputs.vip_file_path }}' `
+            -RequiredBitness '32' `
+            -OutputDirectory $outputDirectory `
+            -RunnerLabel $env:RUNNER_LABEL_X86
+
+      - name: Publish VIPM install smoke summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'vipm-install-x86'
+          $statusPath = Join-Path $outputDirectory 'vipm-install.status.json'
+          $resultPath = Join-Path $outputDirectory 'vipm-install.result.json'
+          $artifactName = "docker-contract-vipm-install-x86-$env:GITHUB_RUN_ID"
+          $status = 'unknown'
+          $reason = ''
+          $labviewYear = ''
+          $installSucceeded = ''
+          $uninstallSucceeded = ''
+
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $statusPayload = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              $status = [string]$statusPayload.status
+              $reason = [string]$statusPayload.reason
+            } catch {
+              $status = 'invalid'
+              $reason = "Unable to parse status payload: $($_.Exception.Message)"
+            }
+          } else {
+            $status = 'missing'
+            $reason = "Status payload not found at '$statusPath'."
+          }
+
+          if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            try {
+              $resultPayload = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              $labviewYear = [string]$resultPayload.source.labview_year
+              $installSucceeded = [string]$resultPayload.install_succeeded
+              $uninstallSucceeded = [string]$resultPayload.uninstall_succeeded
+            } catch {
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                $reason = "Unable to parse result payload: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          @(
+            '## VIPM Install Smoke (x86)'
+            ''
+            ('- Status: {0}' -f $status)
+            ('- LabVIEW year (.lvversion): {0}' -f $labviewYear)
+            '- Bitness: `32`'
+            ('- Install succeeded: {0}' -f $installSucceeded)
+            ('- Uninstall succeeded: {0}' -f $uninstallSucceeded)
+            ('- Artifact: {0}' -f $artifactName)
+            ('- Diagnostics root: {0}' -f $outputDirectory)
+            ('- VIP artifact path: {0}' -f '${{ steps.resolve-vip.outputs.vip_file_path }}')
+            ('- Runner label: {0}' -f '${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}')
+            ('- Result payload: {0}' -f $resultPath)
+            ('- Log path: {0}' -f (Join-Path $outputDirectory 'vipm-install.log'))
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          if (-not [string]::IsNullOrWhiteSpace($reason)) {
+            ('- Reason: {0}' -f $reason.Replace("`r", ' ').Replace("`n", ' ')) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload VIPM install smoke diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipm-install-x86-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipm-install-x86
+          if-no-files-found: error
+
+  ci-self-hosted-final-gate:
+    runs-on: ubuntu-latest
+    needs: [build-vip-self-hosted, install-vip-x86-self-hosted]
+    steps:
+      - name: Final self-hosted CI gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Self-hosted CI final gate passed."
+
+

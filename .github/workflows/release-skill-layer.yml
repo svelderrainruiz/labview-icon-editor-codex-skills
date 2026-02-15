@@ -8,45 +8,61 @@ on:
         required: true
         type: string
       consumer_repo:
-        description: Consumer repository that owns the parity gate run.
+        description: Source project repository to build against.
         required: true
         default: svelderrainruiz/labview-icon-editor
         type: string
       consumer_ref:
-        description: Consumer ref to dispatch parity against (branch/tag/ref).
+        description: Source project ref to build against (branch/tag/ref).
         required: true
         type: string
       consumer_sha:
-        description: Consumer commit SHA that parity must validate.
+        description: Source project commit SHA that CI must validate.
         required: true
         type: string
       run_self_hosted:
-        description: Require self-hosted parity lane in the consumer parity run.
+        description: (Deprecated) retained for dispatch compatibility; no-op in CI-gated release flow.
         required: false
         default: true
         type: boolean
       run_build_spec:
-        description: Require build-spec parity execution in the consumer parity run.
+        description: (Deprecated) retained for dispatch compatibility; no-op in CI-gated release flow.
         required: false
         default: true
+        type: boolean
+      labview_profile:
+        description: LabVIEW target preset id from profiles/labview/profiles.json.
+        required: false
+        default: lv2026
+        type: string
+      source_labview_version_override:
+        description: Optional effective source project .lvversion override (major.minor, minimum 20.0).
+        required: false
+        default: ''
+        type: string
+      run_lv2020_edge_smoke:
+        description: Run optional non-gating LV2020 x64 edge smoke diagnostics during CI gate.
+        required: false
+        default: false
         type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  parity-gate:
-    uses: ./.github/workflows/labview-parity.yml
+  ci-gate:
+    uses: ./.github/workflows/ci.yml
     with:
-      consumer_repo: ${{ inputs.consumer_repo }}
-      consumer_ref: ${{ inputs.consumer_ref }}
-      consumer_sha: ${{ inputs.consumer_sha }}
-      run_self_hosted: ${{ inputs.run_self_hosted }}
-      run_build_spec: ${{ inputs.run_build_spec }}
+      source_project_repo: ${{ inputs.consumer_repo }}
+      source_project_ref: ${{ inputs.consumer_ref }}
+      source_project_sha: ${{ inputs.consumer_sha }}
+      labview_profile: ${{ inputs.labview_profile }}
+      source_labview_version_override: ${{ inputs.source_labview_version_override }}
+      run_lv2020_edge_smoke: ${{ inputs.run_lv2020_edge_smoke }}
     secrets: inherit
 
   package:
-    needs: [parity-gate]
+    needs: [ci-gate]
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
@@ -123,7 +139,187 @@ jobs:
           path: ${{ steps.package.outputs.asset_path }}
           if-no-files-found: error
 
-      - name: Publish release asset
+  publish-release-assets:
+    needs: [ci-gate, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-skill-layer
+          path: ${{ runner.temp }}/release-assets/installer
+
+      - name: Download Windows PPL bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: docker-contract-ppl-bundle-windows-x64-*
+          path: ${{ runner.temp }}/release-assets/ppl-bundle-windows
+          merge-multiple: true
+
+      - name: Download Linux PPL bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: docker-contract-ppl-bundle-linux-x64-*
+          path: ${{ runner.temp }}/release-assets/ppl-bundle-linux
+          merge-multiple: true
+
+      - name: Download self-hosted VIP package artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: docker-contract-vip-package-self-hosted-*
+          path: ${{ runner.temp }}/release-assets/vip-package-self-hosted
+          merge-multiple: true
+
+      - id: stage
+        name: Stage release assets and provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseTag = '${{ inputs.release_tag }}'
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            throw 'release_tag input is required.'
+          }
+
+          $assetsRoot = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $stageDir = Join-Path $env:RUNNER_TEMP 'release-stage'
+          if (Test-Path -LiteralPath $stageDir) {
+            Remove-Item -LiteralPath $stageDir -Recurse -Force
+          }
+          New-Item -Path $stageDir -ItemType Directory -Force | Out-Null
+
+          $installerDir = Join-Path $assetsRoot 'installer'
+          $windowsBundleDir = Join-Path $assetsRoot 'ppl-bundle-windows'
+          $linuxBundleDir = Join-Path $assetsRoot 'ppl-bundle-linux'
+          $vipPackageDir = Join-Path $assetsRoot 'vip-package-self-hosted'
+
+          foreach ($requiredDir in @($installerDir, $windowsBundleDir, $linuxBundleDir, $vipPackageDir)) {
+            if (-not (Test-Path -LiteralPath $requiredDir -PathType Container)) {
+              throw "Required release asset directory missing: $requiredDir"
+            }
+          }
+
+          $installerFile = Get-ChildItem -LiteralPath $installerDir -File -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installerFile) {
+            throw "Installer artifact does not contain an .exe file under '$installerDir'."
+          }
+
+          $stagedInstallerPath = Join-Path $stageDir 'lvie-codex-skill-layer-installer.exe'
+          Copy-Item -LiteralPath $installerFile.FullName -Destination $stagedInstallerPath -Force
+
+          $windowsZipPath = Join-Path $stageDir 'lvie-ppl-bundle-windows-x64.zip'
+          if (Test-Path -LiteralPath $windowsZipPath -PathType Leaf) { Remove-Item -LiteralPath $windowsZipPath -Force }
+          Compress-Archive -Path (Join-Path $windowsBundleDir '*') -DestinationPath $windowsZipPath
+
+          $linuxZipPath = Join-Path $stageDir 'lvie-ppl-bundle-linux-x64.zip'
+          if (Test-Path -LiteralPath $linuxZipPath -PathType Leaf) { Remove-Item -LiteralPath $linuxZipPath -Force }
+          Compress-Archive -Path (Join-Path $linuxBundleDir '*') -DestinationPath $linuxZipPath
+
+          $vipZipPath = Join-Path $stageDir 'lvie-vip-package-self-hosted.zip'
+          if (Test-Path -LiteralPath $vipZipPath -PathType Leaf) { Remove-Item -LiteralPath $vipZipPath -Force }
+          Compress-Archive -Path (Join-Path $vipPackageDir '*') -DestinationPath $vipZipPath
+
+          $assetFiles = @(
+            Get-Item -LiteralPath $stagedInstallerPath,
+            Get-Item -LiteralPath $windowsZipPath,
+            Get-Item -LiteralPath $linuxZipPath,
+            Get-Item -LiteralPath $vipZipPath
+          )
+
+          $assetRecords = foreach ($asset in $assetFiles) {
+            [pscustomobject]@{
+              name = $asset.Name
+              size_bytes = [int64]$asset.Length
+              sha256 = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+
+          $provenancePath = Join-Path $stageDir 'release-provenance.json'
+          $provenance = [pscustomobject]@{
+            schema_version = '1.0'
+            generated_utc = (Get-Date).ToUniversalTime().ToString('o')
+            release_tag = $releaseTag
+            source_project = [pscustomobject]@{
+              repo = '${{ inputs.consumer_repo }}'
+              ref = '${{ inputs.consumer_ref }}'
+              sha = '${{ inputs.consumer_sha }}'
+            }
+            skills_ci_run = [pscustomobject]@{
+              repository = '${{ github.repository }}'
+              run_id = '${{ github.run_id }}'
+              run_attempt = '${{ github.run_attempt }}'
+              run_url = 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            }
+            release_workflow = [pscustomobject]@{
+              run_self_hosted = '${{ inputs.run_self_hosted }}'
+              run_build_spec = '${{ inputs.run_build_spec }}'
+              source_labview_version_override = '${{ inputs.source_labview_version_override }}'
+              run_lv2020_edge_smoke = '${{ inputs.run_lv2020_edge_smoke }}'
+              nsis_root = '${{ needs.package.outputs.nsis_root }}'
+            }
+            assets = $assetRecords
+          }
+          $provenance | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $provenancePath -Encoding UTF8
+
+          $payloadManifestScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/New-ReleasePayloadManifest.ps1'
+          if (-not (Test-Path -LiteralPath $payloadManifestScript -PathType Leaf)) {
+            throw "Release payload manifest script not found: $payloadManifestScript"
+          }
+          $payloadManifestSchema = Join-Path $env:GITHUB_WORKSPACE 'schemas/release-payload-contract.schema.json'
+          if (-not (Test-Path -LiteralPath $payloadManifestSchema -PathType Leaf)) {
+            throw "Release payload manifest schema not found: $payloadManifestSchema"
+          }
+          $payloadManifestPath = Join-Path $stageDir 'release-payload-manifest.json'
+
+          & $payloadManifestScript `
+            -ReleaseTag $releaseTag `
+            -StageDirectory $stageDir `
+            -SourceProjectRepo '${{ inputs.consumer_repo }}' `
+            -SourceProjectRef '${{ inputs.consumer_ref }}' `
+            -SourceProjectSha '${{ inputs.consumer_sha }}' `
+            -CiRepository '${{ github.repository }}' `
+            -CiRunId '${{ github.run_id }}' `
+            -CiRunAttempt '${{ github.run_attempt }}' `
+            -CiRunUrl 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}' `
+            -OutputPath $payloadManifestPath `
+            -SchemaPath $payloadManifestSchema
+
+          $provenanceSha = (Get-FileHash -LiteralPath $provenancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $payloadManifestSha = (Get-FileHash -LiteralPath $payloadManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $notes = @(
+            'Layered Codex skill asset for labview-icon-editor.',
+            '',
+            'Release assets:',
+            "- lvie-codex-skill-layer-installer.exe (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-codex-skill-layer-installer.exe' } | Select-Object -ExpandProperty sha256))",
+            "- lvie-ppl-bundle-windows-x64.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-ppl-bundle-windows-x64.zip' } | Select-Object -ExpandProperty sha256))",
+            "- lvie-ppl-bundle-linux-x64.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-ppl-bundle-linux-x64.zip' } | Select-Object -ExpandProperty sha256))",
+            "- lvie-vip-package-self-hosted.zip (SHA256: $($assetRecords | Where-Object { $_.name -eq 'lvie-vip-package-self-hosted.zip' } | Select-Object -ExpandProperty sha256))",
+            "- release-provenance.json (SHA256: $provenanceSha)",
+            "- release-payload-manifest.json (SHA256: $payloadManifestSha)",
+            '',
+            'CI provenance:',
+            '- skills_ci_repo: ${{ github.repository }}',
+            '- skills_ci_run_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+            '- skills_ci_run_id: ${{ github.run_id }}',
+            '- skills_ci_run_attempt: ${{ github.run_attempt }}',
+            '- source_project_repo: ${{ inputs.consumer_repo }}',
+            '- source_project_ref: ${{ inputs.consumer_ref }}',
+            '- source_project_sha: ${{ inputs.consumer_sha }}',
+            '- source_labview_version_override: ${{ inputs.source_labview_version_override }}',
+            '- run_lv2020_edge_smoke: ${{ inputs.run_lv2020_edge_smoke }}',
+            '- nsis_root: ${{ needs.package.outputs.nsis_root }}',
+            '- run_self_hosted: ${{ inputs.run_self_hosted }} (deprecated)',
+            '- run_build_spec: ${{ inputs.run_build_spec }} (deprecated)'
+          ) -join [Environment]::NewLine
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding UTF8
+
+          "stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "notes_path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
@@ -134,38 +330,26 @@ jobs:
             throw 'release_tag input is required.'
           }
 
-          $assetPath = '${{ steps.package.outputs.asset_path }}'
-          if (-not (Test-Path -Path $assetPath -PathType Leaf)) {
-            throw "Packaged asset not found: $assetPath"
+          $stageDir = '${{ steps.stage.outputs.stage_dir }}'
+          if (-not (Test-Path -LiteralPath $stageDir -PathType Container)) {
+            throw "Staged release directory not found: $stageDir"
           }
 
-          $notes = @(
-            'Layered Codex skill asset for labview-icon-editor.',
-            '',
-            '- Asset: lvie-codex-skill-layer-installer.exe',
-            '- SHA256: ${{ steps.package.outputs.asset_sha256 }}',
-            '- License: 0BSD',
-            '',
-            'Release provenance:',
-            "- skills_parity_gate_repo: ${{ needs.parity-gate.outputs.gate_repo }}",
-            "- skills_parity_gate_run_url: ${{ needs.parity-gate.outputs.gate_run_url }}",
-            "- skills_parity_gate_run_id: ${{ needs.parity-gate.outputs.gate_run_id }}",
-            "- skills_parity_gate_run_attempt: ${{ needs.parity-gate.outputs.gate_run_attempt }}",
-            "- skills_parity_enforcement_profile: ${{ needs.parity-gate.outputs.parity_enforcement_profile }}",
-            "- consumer_repo: ${{ inputs.consumer_repo }}",
-            "- consumer_ref: ${{ inputs.consumer_ref }}",
-            "- consumer_sha: ${{ inputs.consumer_sha }}",
-            "- consumer_sandbox_checked_sha: ${{ needs.parity-gate.outputs.consumer_sandbox_checked_sha }}",
-            "- consumer_sandbox_evidence_artifact: ${{ needs.parity-gate.outputs.consumer_sandbox_evidence_artifact }}",
-            "- consumer_parity_run_url: ${{ needs.parity-gate.outputs.parity_run_url }}",
-            "- consumer_parity_run_id: ${{ needs.parity-gate.outputs.parity_run_id }}",
-            "- consumer_parity_head_sha: ${{ needs.parity-gate.outputs.parity_head_sha }}",
-            "- nsis_root: ${{ steps.package.outputs.nsis_root }}"
-          ) -join [Environment]::NewLine
+          $assetPaths = @(Get-ChildItem -LiteralPath $stageDir -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          if ($assetPaths.Count -eq 0) {
+            throw "No release assets found under '$stageDir'."
+          }
+
+          $notesPath = '${{ steps.stage.outputs.notes_path }}'
+          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) {
+            throw "Release notes file not found: $notesPath"
+          }
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $assetPath --repo $env:GITHUB_REPOSITORY --clobber
+            & gh release edit $tag --repo $env:GITHUB_REPOSITORY --title $tag --notes-file $notesPath
+            & gh release upload $tag @assetPaths --repo $env:GITHUB_REPOSITORY --clobber
           } else {
-            gh release create $tag $assetPath --repo $env:GITHUB_REPOSITORY --title $tag --notes $notes
+            & gh release create $tag @assetPaths --repo $env:GITHUB_REPOSITORY --title $tag --notes-file $notesPath
           }
+

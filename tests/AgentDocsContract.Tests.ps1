@@ -47,11 +47,11 @@ Describe 'Agent docs contract' {
         $content = [string]$script:docs['release-gates.md']
 
         foreach ($artifact in @(
-            'lv_icon_x64.lvlibp',
-            'lv_icon_x86.lvlibp',
-            'conformance-full',
-            'core-conformance-linux-evidence',
-            'core-conformance-windows-evidence'
+            'docker-contract-ppl-bundle-windows-x64-<run_id>',
+            'docker-contract-ppl-bundle-linux-x64-<run_id>',
+            'docker-contract-vip-package-self-hosted-<run_id>',
+            'codex-skill-layer',
+            'release-payload-manifest.json'
         )) {
             $content | Should -Match ([regex]::Escape($artifact))
         }
@@ -71,4 +71,33 @@ Describe 'Agent docs contract' {
         $content | Should -Match 'actions/runs/<RUN_ID>/jobs'
         $content | Should -Match 'actions/runs/<RUN_ID>/artifacts'
     }
+
+    It 'documents self-hosted runner label and source remote triage guidance' {
+        $quickstart = [string]$script:docs['quickstart.md']
+        $releaseGates = [string]$script:docs['release-gates.md']
+
+        $quickstart | Should -Match 'actions/runners'
+        $quickstart | Should -Match 'self-hosted-windows-lv<YYYY>x64'
+        $quickstart | Should -Match 'Assert-SourceProjectRemotes\.ps1'
+        $quickstart | Should -Match 'no deterministic `g-cli \.\.\. lunit -- -h` preflight'
+        $quickstart | Should -Match 'diagnostic-only LV2026 x64 control probe'
+        $quickstart | Should -Match '-EnforceLabVIEWProcessIsolation'
+        $quickstart | Should -Match 'skipped_unable_to_clear_active_labview_processes'
+        $quickstart | Should -Match 'run-lunit-smoke-lv2020x64` does not use `-AllowNoTestcasesWhenControlProbePasses'
+        $quickstart | Should -Match 'run-lunit-smoke-lv2020x64-edge'
+        $quickstart | Should -Match 'source_labview_version_override'
+        $quickstart | Should -Match 'run_lv2020_edge_smoke'
+        $quickstart | Should -Match 'major\.minor'
+        $quickstart | Should -Match 'Minimum supported LabVIEW version is 20\.0'
+        $quickstart | Should -Match 'run-lunit-smoke-lv2020x64-edge'
+        $releaseGates | Should -Match '## Self-hosted preflight policy'
+        $releaseGates | Should -Match 'Assert-SourceProjectRemotes\.ps1'
+        $releaseGates | Should -Match 'git ls-remote upstream'
+        $releaseGates | Should -Match 'diagnostic-only LV2026 x64 control probe'
+        $releaseGates | Should -Match '-EnforceLabVIEWProcessIsolation'
+        $releaseGates | Should -Match 'source_labview_version_override'
+        $releaseGates | Should -Match 'run_lv2020_edge_smoke'
+        $releaseGates | Should -Match 'optional non-gating LV2020 edge smoke'
+    }
 }
+
