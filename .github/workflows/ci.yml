@@ -1813,11 +1813,17 @@ jobs:
           try {
             Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
             Start-Sleep -Seconds 2
-            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
-            Start-Sleep -Seconds 2
 
-            if (Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32') {
-              throw "LabVIEW $labviewYear (32-bit) is still running after two LabVIEWCLI close attempts; aborting native x86 PPL build for process isolation."
+            $targetLabVIEWStillRunning = Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32'
+            if ($targetLabVIEWStillRunning) {
+              Write-Warning "LabVIEW $labviewYear (32-bit) is still running after initial LabVIEWCLI close; retrying close once."
+              Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+              Start-Sleep -Seconds 2
+              $targetLabVIEWStillRunning = Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32'
+            }
+
+            if ($targetLabVIEWStillRunning) {
+              throw "LabVIEW $labviewYear (32-bit) is still running after LabVIEWCLI close attempts; aborting native x86 PPL build for process isolation."
             }
 
             & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
