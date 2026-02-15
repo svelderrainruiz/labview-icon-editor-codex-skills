@@ -1021,10 +1021,10 @@ jobs:
           @(
             '## Effective .lvversion (VIPB prep)'
             ''
-            ("- Override active: `{0}`" -f $overrideActive)
-            ("- Before: `{0}`" -f $beforeRaw)
-            ("- Effective requested: `{0}`" -f $effectiveRaw)
-            ("- After: `{0}`" -f $afterRaw)
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - id: labview-version
@@ -1407,10 +1407,10 @@ jobs:
           @(
             '## Effective .lvversion (self-hosted build)'
             ''
-            ("- Override active: `{0}`" -f $overrideActive)
-            ("- Before: `{0}`" -f $beforeRaw)
-            ("- Effective requested: `{0}`" -f $effectiveRaw)
-            ("- After: `{0}`" -f $afterRaw)
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Validate self-hosted native LabVIEW prerequisites
@@ -1732,10 +1732,10 @@ jobs:
           @(
             '## Effective .lvversion (x86 install smoke)'
             ''
-            ("- Override active: `{0}`" -f $overrideActive)
-            ("- Before: `{0}`" -f $beforeRaw)
-            ("- Effective requested: `{0}`" -f $effectiveRaw)
-            ("- After: `{0}`" -f $afterRaw)
+            ("- Override active: {0}" -f $overrideActive)
+            ("- Before: {0}" -f $beforeRaw)
+            ("- Effective requested: {0}" -f $effectiveRaw)
+            ("- After: {0}" -f $afterRaw)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Run VIPM install smoke (x86, .lvversion-driven)
@@ -1802,21 +1802,21 @@ jobs:
           @(
             '## VIPM Install Smoke (x86)'
             ''
-            ("- Status: `{0}`" -f $status)
-            ("- LabVIEW year (.lvversion): `{0}`" -f $labviewYear)
+            ('- Status: {0}' -f $status)
+            ('- LabVIEW year (.lvversion): {0}' -f $labviewYear)
             '- Bitness: `32`'
-            ("- Install succeeded: `{0}`" -f $installSucceeded)
-            ("- Uninstall succeeded: `{0}`" -f $uninstallSucceeded)
-            ("- Artifact: `{0}`" -f $artifactName)
-            ("- Diagnostics root: `{0}`" -f $outputDirectory)
-            ("- VIP artifact path: `{0}`" -f '${{ steps.resolve-vip.outputs.vip_file_path }}')
-            ("- Runner label: `{0}`" -f '${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}')
-            ("- Result payload: `{0}`" -f $resultPath)
-            ("- Log path: `{0}`" -f (Join-Path $outputDirectory 'vipm-install.log'))
+            ('- Install succeeded: {0}' -f $installSucceeded)
+            ('- Uninstall succeeded: {0}' -f $uninstallSucceeded)
+            ('- Artifact: {0}' -f $artifactName)
+            ('- Diagnostics root: {0}' -f $outputDirectory)
+            ('- VIP artifact path: {0}' -f '${{ steps.resolve-vip.outputs.vip_file_path }}')
+            ('- Runner label: {0}' -f '${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}')
+            ('- Result payload: {0}' -f $resultPath)
+            ('- Log path: {0}' -f (Join-Path $outputDirectory 'vipm-install.log'))
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
           if (-not [string]::IsNullOrWhiteSpace($reason)) {
-            ("- Reason: `{0}`" -f $reason.Replace("`r", ' ').Replace("`n", ' ')) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            ('- Reason: {0}' -f $reason.Replace("`r", ' ').Replace("`n", ' ')) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
 
       - name: Upload VIPM install smoke diagnostics artifact
