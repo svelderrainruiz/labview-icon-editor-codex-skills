@@ -324,10 +324,14 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'BuildProjectSpec\.ps1'
         $script:workflowContent | Should -Match 'Upload consumed VIPB \(post-mortem\)'
         $script:workflowContent | Should -Match 'docker-contract-vipb-modified-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match 'Invoke-VipBuild\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-VipmBuildPackage\.ps1'
+        $script:workflowContent | Should -Match 'Required command ''vipm'' not found on PATH for self-hosted packaging lane'
+        $script:workflowContent | Should -Not -Match 'Required command ''g-cli'' not found on PATH for self-hosted packaging lane'
         $script:workflowContent | Should -Match '-Major \$env:VERSION_MAJOR'
         $script:workflowContent | Should -Match '-Minor \$env:VERSION_MINOR'
         $script:workflowContent | Should -Match '-Patch \$env:VERSION_PATCH'
+        $script:workflowContent | Should -Match 'Upload VIPM package build diagnostics artifact'
+        $script:workflowContent | Should -Match 'docker-contract-vipm-build-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'docker-contract-vip-package-self-hosted-\$\{\{\s*github\.run_id\s*\}\}'
     }
 

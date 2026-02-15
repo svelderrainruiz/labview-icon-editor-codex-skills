@@ -103,6 +103,9 @@ Installer contract:
     - consume prepared VIPB artifact from Linux prep job into `consumer/Tooling/deployment/NI Icon editor.vipb`
     - consume x64 PPL `consumer/resource/plugins/lv_icon_x64.lvlibp` from Windows bundle
     - build native x86 PPL `consumer/resource/plugins/lv_icon_x86.lvlibp`
+  - VIP package build path uses VIPM CLI:
+    - `scripts/Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
+    - g-cli is limited to LUnit smoke only.
   - package version baseline for native lane: `0.1.0.<run_number>`
   - runner-cli fallback build/download is explicitly disabled in this lane via `LVIE_RUNNER_CLI_SKIP_BUILD=1` and `LVIE_RUNNER_CLI_SKIP_DOWNLOAD=1`
   - post-package VIPM install smoke (`install-vip-x86-self-hosted`) runs with:
@@ -162,6 +165,13 @@ Installer contract:
     - `profile-resolution.input.json`
   - `docker-contract-vipb-modified-self-hosted-<run_id>` containing:
     - consumed `consumer/Tooling/deployment/NI Icon editor.vipb` used by the self-hosted package build (post-mortem copy)
+  - `docker-contract-vipm-build-self-hosted-<run_id>` containing:
+    - `vipm-build.status.json`
+    - `vipm-build.result.json`
+    - `vipm-build.log`
+    - `commands/help-build.txt`
+    - `commands/build.txt`
+    - `commands/activate.txt` (when community activation is enabled)
   - `docker-contract-vip-package-self-hosted-<run_id>` containing:
     - latest built `.vip` from the native self-hosted lane
   - `docker-contract-vipm-install-x86-<run_id>` containing:

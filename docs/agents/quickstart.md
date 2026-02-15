@@ -90,6 +90,9 @@ gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --
 - LV2020 smoke command contract is run-only:
   - `g-cli --lv-ver <YYYY> --arch 64 lunit -- -r <report> <project.lvproj>`
   - no deterministic `g-cli ... lunit -- -h` preflight.
+- VIP package build path uses VIPM CLI:
+  - `Invoke-VipmBuildPackage.ps1` runs `vipm --labview-version <YYYY> --labview-bitness 64 build <vipb>`
+  - g-cli is limited to LUnit smoke only.
 - Source-year override behavior:
   - the job keeps key `run-lunit-smoke-lv2020x64` for compatibility,
   - execution target year and `.lvversion` are resolved from effective target selection in `resolve-labview-profile`,

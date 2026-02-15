@@ -1616,7 +1616,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
           $requiredFiles = @(
-            'Tooling/Invoke-VipBuild.ps1',
             '.github/actions/build-lvlibp/BuildProjectSpec.ps1',
             '.github/actions/rename-file/Rename-file.ps1',
             'Tooling/support/LabVIEWVersion.ps1',
@@ -1628,8 +1627,8 @@ jobs:
               throw "Missing required source project asset '$fullPath'."
             }
           }
-          if (-not (Get-Command g-cli -ErrorAction SilentlyContinue)) {
-            throw "Required command 'g-cli' not found on PATH for self-hosted packaging lane."
+          if (-not (Get-Command vipm -ErrorAction SilentlyContinue)) {
+            throw "Required command 'vipm' not found on PATH for self-hosted packaging lane."
           }
 
       - id: labview-version
@@ -1740,39 +1739,6 @@ jobs:
             throw "Native x86 PPL output not found at '$x86Path'."
           }
 
-      - id: display-info
-        name: Generate VIP display information JSON
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          $releaseNotesPath = Join-Path $consumerRoot 'Tooling/deployment/release_notes.md'
-          $releaseNotes = if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
-            Get-Content -Raw -Path $releaseNotesPath
-          } else {
-            ''
-          }
-
-          $info = @{
-            "Package Version" = @{
-              "major" = [int]$env:VERSION_MAJOR
-              "minor" = [int]$env:VERSION_MINOR
-              "patch" = [int]$env:VERSION_PATCH
-              "build" = [int]$env:VERSION_BUILD
-            }
-            "Product Name" = "labview-icon-editor"
-            "Company Name" = "${{ github.repository_owner }}"
-            "Author Name (Person or Company)" = "${{ github.repository }}"
-            "Product Homepage (URL)" = "https://github.com/${{ github.repository }}"
-            "Legal Copyright" = "Copyright $(Get-Date -Format yyyy) ${{ github.repository_owner }}"
-            "Product Description Summary" = "labview-icon-editor VI Package build."
-            "Product Description" = "labview-icon-editor VI Package build."
-            "Release Notes - Change Log" = $releaseNotes
-          }
-
-          $json = $info | ConvertTo-Json -Depth 6 -Compress
-          "json=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
       - name: Upload consumed VIPB (post-mortem)
         if: always()
         uses: actions/upload-artifact@v4
@@ -1783,25 +1749,35 @@ jobs:
 
       - name: Build VI Package (LV 64-bit)
         shell: pwsh
-        env:
-          DISPLAY_INFORMATION_JSON: ${{ steps.display-info.outputs.json }}
         run: |
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/Tooling/Invoke-VipBuild.ps1" `
-            -SupportedBitness 64 `
-            -RepoRoot "$consumerRoot" `
-            -VIPBPath "Tooling/deployment/NI Icon editor.vipb" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -LabVIEWMinorRevision '${{ steps.labview-version.outputs.minor }}' `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT `
-            -ReleaseNotesFile "$consumerRoot/Tooling/deployment/release_notes.md" `
-            -DisplayInformationJSON $env:DISPLAY_INFORMATION_JSON `
-            -VipmTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS
+          $vipmCommunityEdition = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:VIPM_COMMUNITY_EDITION)) {
+            $vipmCommunityEdition = $env:VIPM_COMMUNITY_EDITION.Trim().ToLowerInvariant() -in @('1', 'true', 'yes', 'on')
+          }
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'vipm-build-self-hosted'
+          if (Test-Path -LiteralPath $outputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $outputDirectory -Recurse -Force
+          }
+          New-Item -Path $outputDirectory -ItemType Directory -Force | Out-Null
+          & "$env:GITHUB_WORKSPACE/scripts/Invoke-VipmBuildPackage.ps1" `
+            -SourceProjectRoot $consumerRoot `
+            -VipbPath 'Tooling/deployment/NI Icon editor.vipb' `
+            -LabVIEWVersionYear '${{ steps.labview-version.outputs.year }}' `
+            -LabVIEWBitness '64' `
+            -OutputDirectory $outputDirectory `
+            -VipmCommunityEdition:$vipmCommunityEdition `
+            -CommandTimeoutSeconds $env:VIPM_TIMEOUT_SECONDS `
+            -EnforceLabVIEWProcessIsolation
+
+      - name: Upload VIPM package build diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-contract-vipm-build-self-hosted-${{ github.run_id }}
+          path: ${{ runner.temp }}/vipm-build-self-hosted
+          if-no-files-found: warn
 
       - id: locate-vip
         name: Locate built VI package
