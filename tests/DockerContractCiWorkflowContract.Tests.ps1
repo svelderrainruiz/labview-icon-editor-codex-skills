@@ -154,6 +154,7 @@ Describe 'Docker contract CI workflow contract' {
         $script:workflowContent | Should -Match 'scripts/Invoke-LunitSmokeLv2020\.ps1'
         $script:workflowContent | Should -Match '-TargetLabVIEWVersion 2020'
         $script:workflowContent | Should -Match '-RequiredBitness ''64'''
+        $script:workflowContent | Should -Match '-EnforceLabVIEWProcessIsolation'
         $runLunitBlock | Should -Not -Match '-RequiredBitness ''32'''
         $script:workflowContent | Should -Match 'Publish LabVIEW 2020 LUnit smoke summary'
         $script:workflowContent | Should -Match 'LV2026 Comparative Control Probe \(diagnostic only\)'

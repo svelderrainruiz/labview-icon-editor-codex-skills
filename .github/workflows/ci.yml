@@ -144,7 +144,8 @@ jobs:
             -TargetLabVIEWVersion 2020 `
             -RequiredBitness '64' `
             -OutputDirectory $outputDirectory `
-            -OverrideLvversion '20.0'
+            -OverrideLvversion '20.0' `
+            -EnforceLabVIEWProcessIsolation
 
       - name: Publish LabVIEW 2020 LUnit smoke summary
         if: always()

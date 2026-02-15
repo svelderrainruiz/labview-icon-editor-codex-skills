@@ -69,7 +69,8 @@ Optional inputs:
 - `run-lunit-smoke-lv2020x64` remains a strict gate:
   - LV2020 failure is blocking.
   - a diagnostic-only LV2026 x64 control probe may run on comparable failures (`no_testcases` / `failed_testcases`) to improve root-cause clarity, but it does not change gate outcome.
-  - control probe is skipped when active LabVIEW processes are detected.
+  - CI enforces process isolation (`-EnforceLabVIEWProcessIsolation`) and clears active LabVIEW processes before LV2020 run and before control probe.
+  - if active LabVIEW processes cannot be cleared, control probe is skipped with reason `skipped_unable_to_clear_active_labview_processes`.
 
 ## Provenance policy
 Release notes must include CI and source-project provenance fields produced by `ci.yml` and `release-skill-layer`:

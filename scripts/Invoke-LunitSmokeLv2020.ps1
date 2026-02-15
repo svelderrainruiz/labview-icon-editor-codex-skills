@@ -16,7 +16,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
-    [string]$OverrideLvversion = '20.0'
+    [string]$OverrideLvversion = '20.0',
+
+    [switch]$EnforceLabVIEWProcessIsolation
 )
 
 Set-StrictMode -Version Latest
@@ -101,6 +103,100 @@ function New-QuotedCommand {
             $_
         }
     }) -join ' '
+}
+
+function Get-ActiveLabVIEWProcesses {
+    $processes = @()
+    try {
+        $processes = @(
+            Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProcessName -match '(?i)labview' }
+        )
+    }
+    catch {
+        Write-Log ("WARNING: Unable to enumerate LabVIEW processes: {0}" -f $_.Exception.Message)
+    }
+
+    return @($processes)
+}
+
+function Ensure-LabVIEWProcessQuiescence {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PhaseLabel,
+        [ValidateRange(1, 300)]
+        [int]$GraceTimeoutSeconds = 20,
+        [ValidateRange(1, 300)]
+        [int]$PostKillTimeoutSeconds = 15,
+        [ValidateRange(1, 30)]
+        [int]$PollSeconds = 2
+    )
+
+    $state = [ordered]@{
+        phase = $PhaseLabel
+        status = 'already_clear'
+        initial_process_names = @()
+        initial_process_ids = @()
+        forced_kill_process_names = @()
+        forced_kill_process_ids = @()
+        final_process_names = @()
+        final_process_ids = @()
+    }
+
+    $initialProcesses = @(Get-ActiveLabVIEWProcesses)
+    $state.initial_process_names = @($initialProcesses | Select-Object -ExpandProperty ProcessName -Unique | Sort-Object)
+    $state.initial_process_ids = @($initialProcesses | Select-Object -ExpandProperty Id | Sort-Object)
+    if ($initialProcesses.Count -eq 0) {
+        return $state
+    }
+
+    $state.status = 'detected_active_processes'
+    Write-Log ("Active LabVIEW processes detected before {0}: {1}" -f $PhaseLabel, (($state.initial_process_names | ForEach-Object { $_ }) -join ', '))
+
+    $graceDeadline = (Get-Date).AddSeconds($GraceTimeoutSeconds)
+    while ((Get-Date) -lt $graceDeadline) {
+        Start-Sleep -Seconds $PollSeconds
+        if (@(Get-ActiveLabVIEWProcesses).Count -eq 0) {
+            $state.status = 'cleared_during_grace_period'
+            return $state
+        }
+    }
+
+    $state.status = 'forcing_stop'
+    Write-Log ("LabVIEW processes still active before {0} after {1}s grace period; forcing termination." -f $PhaseLabel, $GraceTimeoutSeconds)
+    $remainingBeforeKill = @(Get-ActiveLabVIEWProcesses)
+    foreach ($proc in $remainingBeforeKill) {
+        try {
+            Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+            $state.forced_kill_process_names = @($state.forced_kill_process_names + $proc.ProcessName)
+            $state.forced_kill_process_ids = @($state.forced_kill_process_ids + [int]$proc.Id)
+        }
+        catch {
+            Write-Log ("WARNING: Failed to terminate LabVIEW process '{0}' (PID {1}) before {2}: {3}" -f $proc.ProcessName, $proc.Id, $PhaseLabel, $_.Exception.Message)
+        }
+    }
+
+    $postKillDeadline = (Get-Date).AddSeconds($PostKillTimeoutSeconds)
+    while ((Get-Date) -lt $postKillDeadline) {
+        Start-Sleep -Seconds $PollSeconds
+        $afterKill = @(Get-ActiveLabVIEWProcesses)
+        if ($afterKill.Count -eq 0) {
+            $state.status = 'cleared_after_forced_stop'
+            return $state
+        }
+    }
+
+    $finalProcesses = @(Get-ActiveLabVIEWProcesses)
+    $state.final_process_names = @($finalProcesses | Select-Object -ExpandProperty ProcessName -Unique | Sort-Object)
+    $state.final_process_ids = @($finalProcesses | Select-Object -ExpandProperty Id | Sort-Object)
+    if ($finalProcesses.Count -eq 0) {
+        $state.status = 'cleared_after_forced_stop'
+    }
+    else {
+        $state.status = 'failed_to_clear'
+    }
+
+    return $state
 }
 
 function Read-LunitReportSummary {
@@ -434,6 +530,11 @@ $result = [ordered]@{
         failed_cases = @()
         error = $null
     }
+    process_hygiene = [ordered]@{
+        enforce_isolation = [bool]$EnforceLabVIEWProcessIsolation
+        before_lv2020_run = $null
+        before_lv2026_control_probe = $null
+    }
     error = $null
 }
 
@@ -581,6 +682,12 @@ try {
     }
 
     $runPhaseStarted = $true
+    if ($EnforceLabVIEWProcessIsolation) {
+        $result.process_hygiene.before_lv2020_run = Ensure-LabVIEWProcessQuiescence -PhaseLabel 'LV2020 smoke run'
+        if ([string]$result.process_hygiene.before_lv2020_run.status -eq 'failed_to_clear') {
+            throw ("Unable to clear active LabVIEW processes before LV2020 smoke run. Remaining process IDs: {0}." -f ((@($result.process_hygiene.before_lv2020_run.final_process_ids) -join ', ')))
+        }
+    }
     Write-Log ("Executing run command: {0}" -f $result.commands.run)
     $runOutput = & $gcliCommand.Source @runArgs 2>&1
     $runExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
@@ -640,24 +747,35 @@ catch {
         }
         else {
             $activeLabVIEWProcessNames = @()
-            try {
-                $activeLabVIEWProcessNames = @(
-                    Get-Process -ErrorAction SilentlyContinue |
-                    Where-Object { $_.ProcessName -match '(?i)labview' } |
-                    Select-Object -ExpandProperty ProcessName -Unique |
-                    Sort-Object
-                )
-            }
-            catch {
-                Write-Log ("WARNING: Unable to enumerate LabVIEW processes before control probe: {0}" -f $_.Exception.Message)
-            }
-
-            $result.control_probe.active_labview_processes = @($activeLabVIEWProcessNames)
-            if ($activeLabVIEWProcessNames.Count -gt 0) {
-                $result.control_probe.reason = 'skipped_active_labview_processes'
-                Write-Log ("Skipping LV2026 control probe because active LabVIEW processes were detected: {0}" -f ($activeLabVIEWProcessNames -join ', '))
+            if ($EnforceLabVIEWProcessIsolation) {
+                $result.process_hygiene.before_lv2026_control_probe = Ensure-LabVIEWProcessQuiescence -PhaseLabel 'LV2026 control probe'
+                $activeLabVIEWProcessNames = @($result.process_hygiene.before_lv2026_control_probe.initial_process_names)
+                $result.control_probe.active_labview_processes = @($activeLabVIEWProcessNames)
+                if ([string]$result.process_hygiene.before_lv2026_control_probe.status -eq 'failed_to_clear') {
+                    $result.control_probe.reason = 'skipped_unable_to_clear_active_labview_processes'
+                    Write-Log ("Skipping LV2026 control probe because active LabVIEW processes could not be cleared before probe. Remaining process IDs: {0}" -f ((@($result.process_hygiene.before_lv2026_control_probe.final_process_ids) -join ', ')))
+                }
             }
             else {
+                try {
+                    $activeLabVIEWProcessNames = @(
+                        Get-ActiveLabVIEWProcesses |
+                        Select-Object -ExpandProperty ProcessName -Unique |
+                        Sort-Object
+                    )
+                }
+                catch {
+                    Write-Log ("WARNING: Unable to enumerate LabVIEW processes before control probe: {0}" -f $_.Exception.Message)
+                }
+
+                $result.control_probe.active_labview_processes = @($activeLabVIEWProcessNames)
+                if ($activeLabVIEWProcessNames.Count -gt 0) {
+                    $result.control_probe.reason = 'skipped_active_labview_processes'
+                    Write-Log ("Skipping LV2026 control probe because active LabVIEW processes were detected: {0}" -f ($activeLabVIEWProcessNames -join ', '))
+                }
+            }
+
+            if ([string]$result.control_probe.reason -notin @('skipped_active_labview_processes', 'skipped_unable_to_clear_active_labview_processes')) {
                 Write-Log 'LV2020 run/report path failed; running diagnostic-only LV2026 control probe.'
                 $result.control_probe = Invoke-Lv2026ControlProbe `
                     -GcliCommandPath $gcliCommandPath `

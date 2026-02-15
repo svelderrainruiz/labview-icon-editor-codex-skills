@@ -81,11 +81,14 @@ Describe 'Agent docs contract' {
         $quickstart | Should -Match 'Assert-SourceProjectRemotes\.ps1'
         $quickstart | Should -Match 'no deterministic `g-cli \.\.\. lunit -- -h` preflight'
         $quickstart | Should -Match 'diagnostic-only LV2026 x64 control probe'
+        $quickstart | Should -Match '-EnforceLabVIEWProcessIsolation'
+        $quickstart | Should -Match 'skipped_unable_to_clear_active_labview_processes'
         $quickstart | Should -Match 'LV2020 remains strict'
         $releaseGates | Should -Match '## Self-hosted preflight policy'
         $releaseGates | Should -Match 'Assert-SourceProjectRemotes\.ps1'
         $releaseGates | Should -Match 'git ls-remote upstream'
         $releaseGates | Should -Match 'diagnostic-only LV2026 x64 control probe'
+        $releaseGates | Should -Match '-EnforceLabVIEWProcessIsolation'
     }
 }
 

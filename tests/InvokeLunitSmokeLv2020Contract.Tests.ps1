@@ -22,6 +22,7 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match '\$RequiredBitness'
         $script:scriptContent | Should -Match '\$OutputDirectory'
         $script:scriptContent | Should -Match '\$OverrideLvversion'
+        $script:scriptContent | Should -Match '\$EnforceLabVIEWProcessIsolation'
         $script:scriptContent | Should -Match 'ValidateSet\(''64''\)'
     }
 
@@ -41,7 +42,9 @@ Describe 'Invoke-LunitSmokeLv2020 script contract' {
         $script:scriptContent | Should -Match 'Invoke-Lv2026ControlProbe'
         $script:scriptContent | Should -Match 'diagnostic-only LV2026 control probe'
         $script:scriptContent | Should -Match 'control_probe'
+        $script:scriptContent | Should -Match 'Ensure-LabVIEWProcessQuiescence'
         $script:scriptContent | Should -Match 'skipped_active_labview_processes'
+        $script:scriptContent | Should -Match 'skipped_unable_to_clear_active_labview_processes'
         $script:scriptContent | Should -Match 'eligibleControlOutcomes = @\(''no_testcases'', ''failed_testcases''\)'
         $script:scriptContent | Should -Match 'lunit-smoke\.status\.json'
         $script:scriptContent | Should -Match 'lunit-smoke\.result\.json'
