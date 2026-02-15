@@ -79,6 +79,8 @@ Describe 'Release workflow contract' {
     It 'implements version-gated auto-release skip when tag already exists on push' {
         $script:releaseContent | Should -Match 'if\s*\(\$isPushMain -and \$tagExists\)\s*\{\s*\$shouldRelease = ''false''\s*\r?\n\s*\$skipReason = ''tag_exists'''
         $script:releaseContent | Should -Match 'repos/\$env:GITHUB_REPOSITORY/git/ref/tags/'
+        $script:releaseContent | Should -Match '\$tagProbeExitCode = \$LASTEXITCODE'
+        $script:releaseContent | Should -Match '\$global:LASTEXITCODE = 0'
         $script:releaseContent | Should -Match "release-skipped:\s*[\s\S]*?if:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.should_release != 'true'\s*\}\}"
     }
 
