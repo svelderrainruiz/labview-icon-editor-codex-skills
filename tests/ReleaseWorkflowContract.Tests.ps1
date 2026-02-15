@@ -73,7 +73,7 @@ Describe 'Release workflow contract' {
         $script:releaseContent | Should -Match 'source_project_sha:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.consumer_sha\s*\}\}'
         $script:releaseContent | Should -Match 'labview_profile:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.labview_profile\s*\}\}'
         $script:releaseContent | Should -Match 'source_labview_version_override:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.source_labview_version_override\s*\}\}'
-        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:\s*\$\{\{\s*needs\.resolve-release-context\.outputs\.run_lv2020_edge_smoke\s*\}\}'
+        $script:releaseContent | Should -Match 'run_lv2020_edge_smoke:\s*\$\{\{\s*fromJSON\(needs\.resolve-release-context\.outputs\.run_lv2020_edge_smoke\)\s*\}\}'
     }
 
     It 'implements version-gated auto-release skip when tag already exists on push' {

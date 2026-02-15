@@ -296,7 +296,7 @@ jobs:
       source_project_sha: ${{ needs.resolve-release-context.outputs.consumer_sha }}
       labview_profile: ${{ needs.resolve-release-context.outputs.labview_profile }}
       source_labview_version_override: ${{ needs.resolve-release-context.outputs.source_labview_version_override }}
-      run_lv2020_edge_smoke: ${{ needs.resolve-release-context.outputs.run_lv2020_edge_smoke }}
+      run_lv2020_edge_smoke: ${{ fromJSON(needs.resolve-release-context.outputs.run_lv2020_edge_smoke) }}
     secrets: inherit
 
   package:
