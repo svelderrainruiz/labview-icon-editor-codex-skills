@@ -231,6 +231,40 @@ Describe 'Docker contract CI workflow contract' {
         @($errors).Count | Should -Be 0
     }
 
+    It 'keeps the pylavi Docker summary PowerShell block parse-safe' {
+        $summaryStepMatch = [regex]::Match(
+            $script:workflowContent,
+            '- name: Publish pylavi Docker validation summary[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name: Upload pylavi Docker validation artifact',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryStepMatch.Success | Should -BeTrue
+
+        $summaryScript = $summaryStepMatch.Groups['script'].Value
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'keeps the runner-cli Docker summary PowerShell block parse-safe' {
+        $summaryStepMatch = [regex]::Match(
+            $script:workflowContent,
+            '- name: Publish runner-cli Linux Docker summary[\s\S]*?run:\s*\|\s*(?<script>[\s\S]*?)\r?\n\s*- name: Upload runner-cli Linux Docker artifact',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline
+        )
+        $summaryStepMatch.Success | Should -BeTrue
+
+        $summaryScript = $summaryStepMatch.Groups['script'].Value
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($summaryScript, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'does not use inline if expressions inside -f format calls in workflow scripts' {
+        $script:workflowContent | Should -Not -Match '-f\s+\(if\s+\('
+    }
+
     It 'asserts source project remotes in each self-hosted job before consumer-script execution' {
         $script:workflowContent | Should -Match 'run-lunit-smoke-lv2020x64:\s*[\s\S]*?Assert source project remotes'
         $script:workflowContent | Should -Match 'build-vip-self-hosted:\s*[\s\S]*?Assert source project remotes'

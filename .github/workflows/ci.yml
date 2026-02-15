@@ -177,12 +177,15 @@ jobs:
             }
           }
 
+          $exitCodeDisplay = if ([string]::IsNullOrWhiteSpace($exitCode)) { 'n/a' } else { $exitCode }
+          $reasonDisplay = if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }
+
           @(
             '## pylavi Docker Source Project Validation'
             ''
             ("- Status: {0}" -f $status)
-            ("- vi_validate exit code: {0}" -f (if ([string]::IsNullOrWhiteSpace($exitCode)) { 'n/a' } else { $exitCode }))
-            ("- Reason: {0}" -f (if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }))
+            ("- vi_validate exit code: {0}" -f $exitCodeDisplay)
+            ("- Reason: {0}" -f $reasonDisplay)
             ("- Diagnostics artifact: {0}" -f $artifactName)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
@@ -278,13 +281,17 @@ jobs:
             }
           }
 
+          $runExitDisplay = if ([string]::IsNullOrWhiteSpace($runExit)) { 'n/a' } else { $runExit }
+          $publishPathDisplay = if ([string]::IsNullOrWhiteSpace($publishPath)) { 'n/a' } else { $publishPath }
+          $reasonDisplay = if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }
+
           @(
             '## runner-cli Linux Docker Lane'
             ''
             ("- Status: {0}" -f $status)
-            ("- Docker run exit code: {0}" -f (if ([string]::IsNullOrWhiteSpace($runExit)) { 'n/a' } else { $runExit }))
-            ("- Published binary path: {0}" -f (if ([string]::IsNullOrWhiteSpace($publishPath)) { 'n/a' } else { $publishPath }))
-            ("- Reason: {0}" -f (if ([string]::IsNullOrWhiteSpace($reason)) { 'n/a' } else { $reason }))
+            ("- Docker run exit code: {0}" -f $runExitDisplay)
+            ("- Published binary path: {0}" -f $publishPathDisplay)
+            ("- Reason: {0}" -f $reasonDisplay)
             ("- Diagnostics artifact: {0}" -f $artifactName)
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
