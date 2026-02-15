@@ -6,17 +6,17 @@ on:
       source_project_repo:
         description: 'Source project repository to build against'
         required: false
-        default: 'svelderrainruiz/labview-icon-editor'
+        default: ''
         type: string
       source_project_ref:
         description: 'Source project ref to check out'
         required: false
-        default: 'patch/456-2020-migration-branch-from-9e46ecf'
+        default: ''
         type: string
       source_project_sha:
         description: 'Expected source project commit SHA'
         required: false
-        default: '9e46ecf591bc36afca8ddf4ce688a5f58604a12a'
+        default: ''
         type: string
       labview_profile:
         description: 'LabVIEW target preset id from profiles/labview/profiles.json'
@@ -36,6 +36,21 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      source_project_repo:
+        description: 'Source project repository to build against'
+        required: false
+        default: ''
+        type: string
+      source_project_ref:
+        description: 'Source project ref to check out'
+        required: false
+        default: ''
+        type: string
+      source_project_sha:
+        description: 'Expected source project commit SHA'
+        required: false
+        default: ''
+        type: string
       labview_profile:
         description: 'LabVIEW target preset id from profiles/labview/profiles.json'
         required: false
@@ -56,16 +71,17 @@ permissions:
   contents: read
 
 env:
-  CONSUMER_REPO: ${{ inputs.source_project_repo || 'svelderrainruiz/labview-icon-editor' }}
-  CONSUMER_REF: ${{ inputs.source_project_ref || 'patch/456-2020-migration-branch-from-9e46ecf' }}
-  CONSUMER_EXPECTED_SHA: ${{ inputs.source_project_sha || '9e46ecf591bc36afca8ddf4ce688a5f58604a12a' }}
+  CONSUMER_REPO: ${{ inputs.source_project_repo || vars.LVIE_SOURCE_PROJECT_REPO || format('{0}/labview-icon-editor', github.repository_owner) }}
+  CONSUMER_REF: ${{ inputs.source_project_ref || vars.LVIE_SOURCE_PROJECT_REF || 'main' }}
+  CONSUMER_EXPECTED_SHA: ${{ inputs.source_project_sha || vars.LVIE_SOURCE_PROJECT_SHA || '' }}
   WINDOWS_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-windows
   LINUX_LABVIEW_IMAGE: nationalinstruments/labview:2026q1-linux-pwsh
   WINDOWS_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.windows.lvlibp
   LINUX_PPL_OUTPUT_PATH: consumer/resource/plugins/lv_icon.linux.lvlibp
   VIPB_PROJECT_PATH: 'consumer/Tooling/deployment/NI Icon editor.vipb'
   LABVIEW_PROFILES_ROOT: profiles/labview
-  DEFAULT_LABVIEW_PROFILE: ${{ inputs.labview_profile || 'lv2026' }}
+  DEFAULT_LABVIEW_PROFILE: ${{ inputs.labview_profile || vars.LVIE_LABVIEW_PROFILE || 'lv2026' }}
+  PARITY_ENFORCEMENT_PROFILE: ${{ vars.LVIE_PARITY_ENFORCEMENT_PROFILE || 'auto' }}
   SOURCE_LVVERSION_OVERRIDE: ${{ inputs.source_labview_version_override || '' }}
   RUN_LV2020_EDGE_SMOKE: ${{ inputs.run_lv2020_edge_smoke || 'false' }}
   LABVIEW_VERSION: '2026'
@@ -98,9 +114,87 @@ jobs:
             -DockerImage $env:LINUX_LABVIEW_IMAGE `
             -TestPath './tests/VipmCliActivationContract.Tests.ps1'
 
-  validate-pylavi-docker-source-project:
+  resolve-source-target:
     runs-on: ubuntu-latest
     needs: [docker-ci]
+    outputs:
+      consumer_repo: ${{ steps.resolve.outputs.consumer_repo }}
+      consumer_ref: ${{ steps.resolve.outputs.consumer_ref }}
+      consumer_sha: ${{ steps.resolve.outputs.consumer_sha }}
+      labview_profile: ${{ steps.resolve.outputs.labview_profile }}
+      parity_enforcement_profile: ${{ steps.resolve.outputs.parity_enforcement_profile }}
+    steps:
+      - id: resolve
+        name: Resolve source project target from inputs and repository variables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $consumerRepo = [string]$env:CONSUMER_REPO
+          $consumerRef = [string]$env:CONSUMER_REF
+          $consumerSha = [string]$env:CONSUMER_EXPECTED_SHA
+          $labviewProfile = [string]$env:DEFAULT_LABVIEW_PROFILE
+          $parityProfile = [string]$env:PARITY_ENFORCEMENT_PROFILE
+
+          if ([string]::IsNullOrWhiteSpace($consumerRepo)) {
+            throw "Resolved source project repository is empty. Provide input 'source_project_repo' or repository variable 'LVIE_SOURCE_PROJECT_REPO'."
+          }
+          $consumerRepo = $consumerRepo.Trim()
+          if ($consumerRepo -notmatch '^[^/\s]+/[^/\s]+$') {
+            throw "Resolved source project repository '$consumerRepo' is invalid. Expected format '<owner>/<repo>'."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($consumerRef)) {
+            throw "Resolved source project ref is empty. Provide input 'source_project_ref' or repository variable 'LVIE_SOURCE_PROJECT_REF'."
+          }
+          $consumerRef = $consumerRef.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($consumerSha)) {
+            throw "Resolved source project SHA is empty. Strict pin is required; set input 'source_project_sha' or repository variable 'LVIE_SOURCE_PROJECT_SHA'."
+          }
+          $consumerSha = $consumerSha.Trim().ToLowerInvariant()
+          if ($consumerSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Resolved source project SHA '$consumerSha' is invalid. Expected 40-char lowercase hex."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($labviewProfile)) {
+            $labviewProfile = 'lv2026'
+          } else {
+            $labviewProfile = $labviewProfile.Trim()
+          }
+
+          if ([string]::IsNullOrWhiteSpace($parityProfile)) {
+            $parityProfile = 'auto'
+          } else {
+            $parityProfile = $parityProfile.Trim().ToLowerInvariant()
+          }
+          if (@('auto', 'strict', 'container-only') -notcontains $parityProfile) {
+            throw "Resolved parity enforcement profile '$parityProfile' is invalid. Expected one of: auto, strict, container-only."
+          }
+
+          "consumer_repo=$consumerRepo" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "consumer_ref=$consumerRef" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "consumer_sha=$consumerSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "labview_profile=$labviewProfile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "parity_enforcement_profile=$parityProfile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          @(
+            '## Source target resolver'
+            ''
+            "- source_project_repo: $consumerRepo"
+            "- source_project_ref: $consumerRef"
+            "- source_project_sha: $consumerSha"
+            "- labview_profile: $labviewProfile"
+            "- parity_enforcement_profile: $parityProfile"
+          ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  validate-pylavi-docker-source-project:
+    runs-on: ubuntu-latest
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     continue-on-error: true
     steps:
       - name: Checkout skill repository
@@ -199,7 +293,11 @@ jobs:
 
   build-runner-cli-linux-docker:
     runs-on: ubuntu-latest
-    needs: [docker-ci]
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     continue-on-error: true
     steps:
       - name: Checkout skill repository
@@ -308,7 +406,11 @@ jobs:
       - self-hosted
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
-    needs: [docker-ci, resolve-labview-profile]
+    needs: [docker-ci, resolve-source-target, resolve-labview-profile]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -525,7 +627,11 @@ jobs:
       - self-hosted
       - windows
       - self-hosted-windows-lv2020x64
-    needs: [docker-ci]
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -592,7 +698,11 @@ jobs:
 
   build-x64-ppl-windows:
     runs-on: windows-latest
-    needs: [docker-ci]
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -762,7 +872,11 @@ jobs:
 
   build-x64-ppl-linux:
     runs-on: ubuntu-latest
-    needs: [docker-ci, build-x64-ppl-windows]
+    needs: [docker-ci, resolve-source-target, build-x64-ppl-windows]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -933,7 +1047,11 @@ jobs:
 
   gather-release-notes:
     runs-on: ubuntu-latest
-    needs: [docker-ci]
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4
@@ -992,7 +1110,11 @@ jobs:
 
   resolve-labview-profile:
     runs-on: ubuntu-latest
-    needs: [docker-ci]
+    needs: [docker-ci, resolve-source-target]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     outputs:
       source_labview_year: ${{ steps.source-labels.outputs.source_labview_year }}
       source_runner_label_x86: ${{ steps.source-labels.outputs.source_runner_label_x86 }}
@@ -1027,7 +1149,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $profileId = '${{ inputs.labview_profile }}'
+          $profileId = '${{ needs.resolve-source-target.outputs.labview_profile }}'
           if ([string]::IsNullOrWhiteSpace($profileId)) {
             $profileId = $env:DEFAULT_LABVIEW_PROFILE
           }
@@ -1176,8 +1298,11 @@ jobs:
 
   prepare-vipb-linux:
     runs-on: ubuntu-latest
-    needs: [docker-ci, gather-release-notes, resolve-labview-profile]
+    needs: [docker-ci, resolve-source-target, gather-release-notes, resolve-labview-profile]
     env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
       VERSION_PATCH: '0'
@@ -1530,8 +1655,11 @@ jobs:
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x64 }}
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
-    needs: [build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-x64, resolve-labview-profile]
+    needs: [resolve-source-target, build-x64-ppl-windows, build-x64-ppl-linux, prepare-vipb-linux, run-lunit-smoke-x64, resolve-labview-profile]
     env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
       VERSION_MAJOR: '0'
       VERSION_MINOR: '1'
       VERSION_PATCH: '0'
@@ -1938,7 +2066,11 @@ jobs:
       - self-hosted
       - windows
       - ${{ needs.resolve-labview-profile.outputs.source_runner_label_x86 }}
-    needs: [build-vip-self-hosted, resolve-labview-profile]
+    needs: [resolve-source-target, build-vip-self-hosted, resolve-labview-profile]
+    env:
+      CONSUMER_REPO: ${{ needs.resolve-source-target.outputs.consumer_repo }}
+      CONSUMER_REF: ${{ needs.resolve-source-target.outputs.consumer_ref }}
+      CONSUMER_EXPECTED_SHA: ${{ needs.resolve-source-target.outputs.consumer_sha }}
     steps:
       - name: Checkout skill repository
         uses: actions/checkout@v4

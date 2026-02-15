@@ -8,20 +8,23 @@ on:
     inputs:
       release_tag:
         description: Release tag to publish (for example, v0.4.0).
-        required: true
+        required: false
+        default: ''
         type: string
       consumer_repo:
         description: Source project repository to build against.
-        required: true
-        default: svelderrainruiz/labview-icon-editor
+        required: false
+        default: ''
         type: string
       consumer_ref:
         description: Source project ref to build against (branch/tag/ref).
-        required: true
+        required: false
+        default: ''
         type: string
       consumer_sha:
         description: Source project commit SHA that CI must validate.
-        required: true
+        required: false
+        default: ''
         type: string
       run_self_hosted:
         description: (Deprecated) retained for dispatch compatibility; no-op in CI-gated release flow.
@@ -78,6 +81,11 @@ jobs:
           EVENT_INPUTS_JSON: ${{ toJson(github.event.inputs) }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          VAR_SOURCE_PROJECT_REPO: ${{ vars.LVIE_SOURCE_PROJECT_REPO || '' }}
+          VAR_SOURCE_PROJECT_REF: ${{ vars.LVIE_SOURCE_PROJECT_REF || '' }}
+          VAR_SOURCE_PROJECT_SHA: ${{ vars.LVIE_SOURCE_PROJECT_SHA || '' }}
+          VAR_LABVIEW_PROFILE: ${{ vars.LVIE_LABVIEW_PROFILE || '' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -93,31 +101,19 @@ jobs:
           }
           $defaultReleaseTag = "v$manifestVersion"
 
-          $ciWorkflowPath = Join-Path $env:GITHUB_WORKSPACE '.github/workflows/ci.yml'
-          if (-not (Test-Path -LiteralPath $ciWorkflowPath -PathType Leaf)) {
-            throw "CI workflow not found at '$ciWorkflowPath'."
+          $defaultConsumerRepo = [string]$env:VAR_SOURCE_PROJECT_REPO
+          if ([string]::IsNullOrWhiteSpace($defaultConsumerRepo)) {
+            $defaultConsumerRepo = '{0}/labview-icon-editor' -f [string]$env:GITHUB_REPOSITORY_OWNER
           }
-          $ciContent = Get-Content -LiteralPath $ciWorkflowPath -Raw -ErrorAction Stop
-
-          function Get-CiDefaultValue {
-            param(
-              [Parameter(Mandatory = $true)]
-              [string]$Key
-            )
-
-            $pattern = "(?ms)$Key:\s*.*?default:\s*'(?<value>[^']+)'"
-            $match = [regex]::Match($ciContent, $pattern)
-            if (-not $match.Success) {
-              throw "Unable to resolve default value for '$Key' from '$ciWorkflowPath'."
-            }
-
-            return [string]$match.Groups['value'].Value
+          $defaultConsumerRef = [string]$env:VAR_SOURCE_PROJECT_REF
+          if ([string]::IsNullOrWhiteSpace($defaultConsumerRef)) {
+            $defaultConsumerRef = 'main'
           }
-
-          $defaultConsumerRepo = Get-CiDefaultValue -Key 'source_project_repo'
-          $defaultConsumerRef = Get-CiDefaultValue -Key 'source_project_ref'
-          $defaultConsumerSha = Get-CiDefaultValue -Key 'source_project_sha'
-          $defaultLabviewProfile = Get-CiDefaultValue -Key 'labview_profile'
+          $defaultConsumerSha = [string]$env:VAR_SOURCE_PROJECT_SHA
+          $defaultLabviewProfile = [string]$env:VAR_LABVIEW_PROFILE
+          if ([string]::IsNullOrWhiteSpace($defaultLabviewProfile)) {
+            $defaultLabviewProfile = 'lv2026'
+          }
 
           $eventInputs = $null
           if (-not [string]::IsNullOrWhiteSpace($env:EVENT_INPUTS_JSON) -and $env:EVENT_INPUTS_JSON -ne 'null') {
@@ -180,10 +176,9 @@ jobs:
 
           if ($isWorkflowDispatch) {
             $dispatchReleaseTag = Get-DispatchInputValue -Name 'release_tag'
-            if ([string]::IsNullOrWhiteSpace($dispatchReleaseTag)) {
-              throw 'release_tag input is required for workflow_dispatch.'
+            if (-not [string]::IsNullOrWhiteSpace($dispatchReleaseTag)) {
+              $releaseTag = $dispatchReleaseTag
             }
-            $releaseTag = $dispatchReleaseTag
 
             $dispatchConsumerRepo = Get-DispatchInputValue -Name 'consumer_repo'
             if (-not [string]::IsNullOrWhiteSpace($dispatchConsumerRepo)) {
@@ -218,6 +213,27 @@ jobs:
 
           if ([string]::IsNullOrWhiteSpace($releaseTag)) {
             throw 'Resolved release tag is empty.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($consumerRepo)) {
+            throw "Resolved source project repository is empty. Provide workflow input 'consumer_repo' or repository variable 'LVIE_SOURCE_PROJECT_REPO'."
+          }
+          $consumerRepo = $consumerRepo.Trim()
+          if ($consumerRepo -notmatch '^[^/\s]+/[^/\s]+$') {
+            throw "Resolved source project repository '$consumerRepo' is invalid. Expected format '<owner>/<repo>'."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($consumerRef)) {
+            throw "Resolved source project ref is empty. Provide workflow input 'consumer_ref' or repository variable 'LVIE_SOURCE_PROJECT_REF'."
+          }
+          $consumerRef = $consumerRef.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($consumerSha)) {
+            throw "Resolved source project SHA is empty. Strict pin is required; set workflow input 'consumer_sha' or repository variable 'LVIE_SOURCE_PROJECT_SHA'."
+          }
+          $consumerSha = $consumerSha.Trim().ToLowerInvariant()
+          if ($consumerSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Resolved source project SHA '$consumerSha' is invalid. Expected 40-char lowercase hex."
           }
 
           $tagExists = $false

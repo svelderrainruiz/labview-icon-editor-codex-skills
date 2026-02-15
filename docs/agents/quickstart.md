@@ -7,8 +7,8 @@ Validation evidence: skills repo CI-coupled release gate
 Get an agent productive in under 10 minutes for CI triage, release GO/NO-GO, and artifact verification.
 
 ## 1) Establish context
-- Skills repo: `svelderrainruiz/labview-icon-editor-codex-skills`
-- Source project repo: `svelderrainruiz/labview-icon-editor`
+- Skills repo: `<owner>/labview-icon-editor-codex-skills`
+- Source project repo: `<owner>/labview-icon-editor`
 - CI gate workflow: `.github/workflows/ci.yml`
 - Release workflow: `.github/workflows/release-skill-layer.yml`
 
@@ -18,19 +18,19 @@ gh auth status
 ```
 
 ```powershell
-gh run list --repo svelderrainruiz/labview-icon-editor-codex-skills --workflow ci.yml --limit 5
+gh run list --repo <owner>/labview-icon-editor-codex-skills --workflow ci.yml --limit 5
 ```
 
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID> --jq '{status, conclusion, head_sha, head_branch, run_attempt, updated_at}'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID> --jq '{status, conclusion, head_sha, head_branch, run_attempt, updated_at}'
 ```
 
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/jobs --paginate --jq '.jobs[] | {name, status, conclusion}'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/jobs --paginate --jq '.jobs[] | {name, status, conclusion}'
 ```
 
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/artifacts --jq '.artifacts[] | .name'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/artifacts --jq '.artifacts[] | .name'
 ```
 
 ## 3) GO/NO-GO gate (minimum)
@@ -67,12 +67,34 @@ Compatibility-only (deprecated) inputs:
 - `release-skill-layer` runs automatically on `push` to `main`.
 - Auto-release resolver derives:
   - `release_tag` as `v<manifest.version>`.
-  - `consumer_repo`, `consumer_ref`, `consumer_sha`, and `labview_profile` from `.github/workflows/ci.yml` defaults.
+  - `consumer_repo`, `consumer_ref`, `consumer_sha`, and `labview_profile` from:
+    - workflow input (manual dispatch),
+    - repository variables (`LVIE_SOURCE_PROJECT_*`, `LVIE_LABVIEW_PROFILE`),
+    - deterministic fallback (`<owner>/labview-icon-editor`, `main`) for repo/ref.
+  - strict source SHA pin is required (`LVIE_SOURCE_PROJECT_SHA` or explicit dispatch input).
 - If the resolved tag already exists, workflow follows deterministic skip path:
   - `should_release=false`
   - `skip_reason=tag_exists`
   - `release-skipped` job succeeds and publishes skip summary.
 - `workflow_dispatch` remains available for explicit overrides and reruns with operator-provided inputs.
+
+## 4.2) One-time fork bootstrap
+Initialize portability variables once in the forked skills repo:
+
+```powershell
+pwsh -NoProfile -File ./scripts/Initialize-ForkPortability.ps1 `
+  -SkillsRepo '<owner>/labview-icon-editor-codex-skills' `
+  -SourceProjectRepo '<owner>/labview-icon-editor' `
+  -SourceProjectRef 'main'
+```
+
+Rotate strict SHA pin later without changing repo/ref:
+
+```powershell
+pwsh -NoProfile -File ./scripts/Initialize-ForkPortability.ps1 `
+  -SkillsRepo '<owner>/labview-icon-editor-codex-skills' `
+  -RefreshSourceSha
+```
 
 ## 5) Provenance fields expected in release notes
 - `skills_ci_repo`
@@ -91,7 +113,7 @@ Compatibility-only (deprecated) inputs:
 ## 6.1) Self-hosted scheduling and remote triage
 - Verify required runner labels exist on at least one online runner:
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
 ```
 - `run-lunit-smoke-x64` uses resolved source-year x64 label from `resolve-labview-profile` output (`self-hosted-windows-lv<YYYY>x64`).
 - Self-hosted jobs enforce source-project remote hygiene via `Assert-SourceProjectRemotes.ps1`:

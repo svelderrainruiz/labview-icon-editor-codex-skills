@@ -3,7 +3,7 @@ param(
   [long]$RunId,
 
   [Parameter(Mandatory = $false)]
-  [string]$OwnerRepo = 'svelderrainruiz/labview-icon-editor-codex-skills',
+  [string]$OwnerRepo = '',
 
   [Parameter(Mandatory = $false)]
   [string]$ReleaseTag,
@@ -19,6 +19,33 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Resolve-OwnerRepo {
+  param(
+    [Parameter(Mandatory = $false)]
+    [string]$Value
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Value)) {
+    return $Value.Trim()
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+    return [string]$env:GITHUB_REPOSITORY
+  }
+
+  try {
+    $originUrl = (git remote get-url origin).Trim()
+    if ($originUrl -match 'github\.com[:/](?<repo>[^/]+/[^/.]+?)(?:\.git)?$') {
+      return [string]$Matches.repo
+    }
+  } catch {
+  }
+
+  throw "OwnerRepo was not provided and could not be inferred. Pass -OwnerRepo <owner/repo>."
+}
+
+$OwnerRepo = Resolve-OwnerRepo -Value $OwnerRepo
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
   $OutputDir = Join-Path (Join-Path $PSScriptRoot '..') 'artifacts/release-metrics'

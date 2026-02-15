@@ -6,7 +6,7 @@ on:
       consumer_repo:
         description: Consumer repository that owns the parity workflow.
         required: true
-        default: svelderrainruiz/labview-icon-editor
+        default: ''
         type: string
       consumer_ref:
         description: Consumer ref to dispatch parity against.
@@ -26,6 +26,11 @@ on:
         required: false
         default: true
         type: boolean
+      parity_enforcement_profile:
+        description: Parity enforcement profile (strict|container-only|auto).
+        required: false
+        default: auto
+        type: string
   workflow_call:
     inputs:
       consumer_repo:
@@ -45,6 +50,10 @@ on:
         required: false
         default: true
         type: boolean
+      parity_enforcement_profile:
+        required: false
+        default: auto
+        type: string
     outputs:
       consumer_sandbox_checked_sha:
         description: Consumer SHA observed from sandbox checkout.
@@ -105,6 +114,8 @@ jobs:
           CONSUMER_REPO: ${{ inputs.consumer_repo }}
           CONSUMER_REF: ${{ inputs.consumer_ref }}
           CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          RUN_SELF_HOSTED: ${{ inputs.run_self_hosted }}
+          PARITY_ENFORCEMENT_PROFILE: ${{ inputs.parity_enforcement_profile }}
         shell: bash
         run: |
           set -euo pipefail
@@ -142,15 +153,42 @@ jobs:
             exit 1
           fi
 
-          if [[ "$CONSUMER_REPO" == "svelderrainruiz/labview-icon-editor" ]]; then
-            parity_enforcement_profile="upstream-strict"
+          requested_profile="$(echo "${PARITY_ENFORCEMENT_PROFILE:-auto}" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if [[ -z "$requested_profile" ]]; then
+            requested_profile="auto"
+          fi
+          requested_run_self_hosted="$(echo "${RUN_SELF_HOSTED:-true}" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if [[ -z "$requested_run_self_hosted" ]]; then
+            requested_run_self_hosted="true"
+          fi
+
+          case "$requested_profile" in
+            strict)
+              parity_enforcement_profile="strict"
+              ;;
+            container-only)
+              parity_enforcement_profile="container-only"
+              ;;
+            auto)
+              if [[ "$requested_run_self_hosted" == "true" || "$requested_run_self_hosted" == "1" ]]; then
+                parity_enforcement_profile="strict"
+              else
+                parity_enforcement_profile="container-only"
+              fi
+              ;;
+            *)
+              echo "Sandbox preflight failed: invalid parity profile '$requested_profile'. Expected strict|container-only|auto." >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$parity_enforcement_profile" == "strict" ]]; then
             required_jobs=(
               "Parity (Linux Container)"
               "Parity (Self-Hosted Runner)"
               "Parity (Windows Container)"
             )
           else
-            parity_enforcement_profile="fork-container-only"
             required_jobs=(
               "Parity (Linux Container)"
               "Parity (Windows Container)"
@@ -177,6 +215,7 @@ jobs:
             --arg consumer_sha "$CONSUMER_SHA" \
             --arg consumer_checked_sha "$consumer_checked_sha" \
             --arg parity_enforcement_profile "$parity_enforcement_profile" \
+            --arg parity_enforcement_profile_request "$requested_profile" \
             --arg lvversion_raw "$lvversion_raw" \
             --arg workflow_sha256 "$workflow_sha256" \
             --argjson required_jobs "$required_jobs_json" \
@@ -187,6 +226,7 @@ jobs:
               consumer_sha: $consumer_sha,
               consumer_checked_sha: $consumer_checked_sha,
               parity_enforcement_profile: $parity_enforcement_profile,
+              parity_enforcement_profile_request: $parity_enforcement_profile_request,
               lvversion_raw: $lvversion_raw,
               consumer_parity_workflow_sha256: $workflow_sha256,
               required_jobs: $required_jobs
@@ -255,8 +295,13 @@ jobs:
           set -euo pipefail
           started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           dispatch_run_self_hosted="$RUN_SELF_HOSTED"
-          if [[ "$PRECHECK_PROFILE" == "fork-container-only" ]]; then
+          if [[ "$PRECHECK_PROFILE" == "container-only" ]]; then
             dispatch_run_self_hosted="false"
+          elif [[ "$PRECHECK_PROFILE" == "strict" ]]; then
+            dispatch_run_self_hosted="true"
+          else
+            echo "Parity gate failed: unknown preflight enforcement profile '$PRECHECK_PROFILE'." >&2
+            exit 1
           fi
 
           echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
@@ -342,15 +387,15 @@ jobs:
             exit 1
           fi
 
-          if [[ "$PRECHECK_PROFILE" == "upstream-strict" ]]; then
-            parity_enforcement_profile="upstream-strict"
+          if [[ "$PRECHECK_PROFILE" == "strict" ]]; then
+            parity_enforcement_profile="strict"
             required_jobs=(
               "Parity (Linux Container)"
               "Parity (Self-Hosted Runner)"
               "Parity (Windows Container)"
             )
-          elif [[ "$PRECHECK_PROFILE" == "fork-container-only" ]]; then
-            parity_enforcement_profile="fork-container-only"
+          elif [[ "$PRECHECK_PROFILE" == "container-only" ]]; then
+            parity_enforcement_profile="container-only"
             required_jobs=(
               "Parity (Linux Container)"
               "Parity (Windows Container)"

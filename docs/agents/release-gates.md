@@ -57,11 +57,11 @@ Advisory lane during rollout:
 - Manual path: `workflow_dispatch` remains available for explicit overrides and reruns.
 - Resolve/publish only when GO.
 
-Required dispatch inputs:
-- `release_tag` (example `v0.4.1`)
-- `consumer_repo` (source project repo)
-- `consumer_ref` (source project ref)
-- `consumer_sha` (source project SHA)
+Dispatch inputs:
+- `release_tag` (optional override; default is `v<manifest.version>`)
+- `consumer_repo` (optional source project repo override)
+- `consumer_ref` (optional source project ref override)
+- `consumer_sha` (optional source project SHA override)
 
 Optional inputs:
 - `labview_profile` (LabVIEW target preset id)
@@ -74,12 +74,25 @@ Optional inputs:
 - Auto-release is version-gated:
   - derive tag from `manifest.json` as `v<manifest.version>`.
   - if tag already exists, skip deterministically with `skip_reason=tag_exists`.
-- Resolver source of truth defaults from `ci.yml`:
-  - `source_project_repo`
-  - `source_project_ref`
-  - `source_project_sha`
-  - `labview_profile`
-- Manual dispatch may override these defaults when needed.
+- Resolver source-target chain:
+  - workflow inputs (manual dispatch),
+  - repository variables (`LVIE_SOURCE_PROJECT_REPO`, `LVIE_SOURCE_PROJECT_REF`, `LVIE_SOURCE_PROJECT_SHA`, `LVIE_LABVIEW_PROFILE`),
+  - deterministic fallback for repo/ref (`<owner>/labview-icon-editor`, `main`).
+- Strict pin remains mandatory:
+  - if `consumer_sha`/`LVIE_SOURCE_PROJECT_SHA` is missing or invalid, release resolves to deterministic failure (no publish).
+- Manual dispatch may override resolved defaults when needed.
+
+## Fork bootstrap policy
+- One-time bootstrap script:
+  - `scripts/Initialize-ForkPortability.ps1`
+- Writes/updates repository variable contract:
+  - `LVIE_SOURCE_PROJECT_REPO`
+  - `LVIE_SOURCE_PROJECT_REF`
+  - `LVIE_SOURCE_PROJECT_SHA`
+  - `LVIE_LABVIEW_PROFILE`
+  - `LVIE_PARITY_ENFORCEMENT_PROFILE`
+- Deterministic SHA rotation:
+  - use `-RefreshSourceSha` on the bootstrap script.
 
 ## Self-hosted preflight policy
 - Before declaring GO for runs that include self-hosted jobs, verify runner label availability:
@@ -130,15 +143,15 @@ Release notes must include CI and source-project provenance fields produced by `
 
 ## Operational commands
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID> --jq '{status, conclusion, head_sha, head_branch, run_attempt, updated_at}'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID> --jq '{status, conclusion, head_sha, head_branch, run_attempt, updated_at}'
 ```
 
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/jobs --paginate --jq '.jobs[] | {name, status, conclusion}'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/jobs --paginate --jq '.jobs[] | {name, status, conclusion}'
 ```
 
 ```powershell
-gh api repos/svelderrainruiz/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/artifacts --jq '.artifacts[] | .name'
+gh api repos/<owner>/labview-icon-editor-codex-skills/actions/runs/<RUN_ID>/artifacts --jq '.artifacts[] | .name'
 ```
 
 ## Decision examples
