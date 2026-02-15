@@ -267,17 +267,17 @@ jobs:
           $summary = @(
             '## Release context resolver'
             ''
-            ("- Event: `{0}`" -f $env:EVENT_NAME)
-            ("- Manifest version: `{0}`" -f $manifestVersion)
-            ("- Resolved release tag: `{0}`" -f $releaseTag)
-            ("- Source project repo: `{0}`" -f $consumerRepo)
-            ("- Source project ref: `{0}`" -f $consumerRef)
-            ("- Source project sha: `{0}`" -f $consumerSha)
-            ("- LabVIEW profile: `{0}`" -f $labviewProfile)
-            ("- source_labview_version_override: `{0}`" -f $sourceLabviewOverrideDisplay)
-            ("- run_lv2020_edge_smoke: `{0}`" -f $runLv2020EdgeSmoke)
-            ("- should_release: `{0}`" -f $shouldRelease)
-            ("- skip_reason: `{0}`" -f $skipReasonDisplay)
+            "- Event: $($env:EVENT_NAME)"
+            "- Manifest version: $manifestVersion"
+            "- Resolved release tag: $releaseTag"
+            "- Source project repo: $consumerRepo"
+            "- Source project ref: $consumerRef"
+            "- Source project sha: $consumerSha"
+            "- LabVIEW profile: $labviewProfile"
+            "- source_labview_version_override: $sourceLabviewOverrideDisplay"
+            "- run_lv2020_edge_smoke: $runLv2020EdgeSmoke"
+            "- should_release: $shouldRelease"
+            "- skip_reason: $skipReasonDisplay"
           ) -join [Environment]::NewLine
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
@@ -606,8 +606,8 @@ jobs:
           @(
             '## release-skill-layer skipped'
             ''
-            ("- Resolved release tag: `{0}`" -f $releaseTag)
-            ("- Reason: `{0}`" -f $skipReason)
+            "- Resolved release tag: $releaseTag"
+            "- Reason: $skipReason"
             '- Behavior: deterministic auto-release skip path (non-failure).'
           ) -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
