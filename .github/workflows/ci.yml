@@ -1711,16 +1711,133 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $consumerRoot = Join-Path $env:GITHUB_WORKSPACE 'consumer'
-          & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
-            -LabVIEWVersion '${{ steps.labview-version.outputs.year }}' `
-            -SupportedBitness 32 `
-            -RepoRoot "$consumerRoot" `
-            -Major $env:VERSION_MAJOR `
-            -Minor $env:VERSION_MINOR `
-            -Patch $env:VERSION_PATCH `
-            -Build $env:VERSION_BUILD `
-            -Commit $env:VERSION_COMMIT `
-            -SkipWorktreeRootCheck
+          $labviewYear = '${{ steps.labview-version.outputs.year }}'
+          $closeScriptPath = Join-Path $consumerRoot '.github/actions/close-labview/Close_LabVIEW.ps1'
+          $closeScriptBackupPath = Join-Path $consumerRoot '.github/actions/close-labview/Close_LabVIEW.gcli.ps1'
+          if (Test-Path -LiteralPath $closeScriptPath -PathType Leaf) {
+            Move-Item -LiteralPath $closeScriptPath -Destination $closeScriptBackupPath -Force
+            Write-Host ("Temporarily disabled g-cli close hook at '{0}' for native PPL build lane." -f $closeScriptPath)
+          }
+
+          function Invoke-LabVIEWCliClose {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$LabVIEWYear,
+              [Parameter(Mandatory = $true)]
+              [ValidateSet('32', '64')]
+              [string]$Bitness
+            )
+
+            $labviewCli = Get-Command LabVIEWCLI -ErrorAction SilentlyContinue
+            if (-not $labviewCli) {
+              throw "LabVIEWCLI is not available on PATH."
+            }
+
+            $installRoot = if ($Bitness -eq '32') {
+              "C:\Program Files (x86)\National Instruments\LabVIEW $LabVIEWYear"
+            } else {
+              "C:\Program Files\National Instruments\LabVIEW $LabVIEWYear"
+            }
+            $labviewPath = Join-Path $installRoot 'LabVIEW.exe'
+
+            $portValue = $null
+            $bitnessPortEnvName = "LVIE_LABVIEWCLI_PORT_{0}" -f $Bitness
+            foreach ($envName in @($bitnessPortEnvName, 'LVIE_LABVIEWCLI_PORT')) {
+              $candidate = [Environment]::GetEnvironmentVariable($envName)
+              if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $portValue = $candidate.Trim()
+                break
+              }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($portValue)) {
+              $iniPath = Join-Path $installRoot 'LabVIEW.ini'
+              if (Test-Path -LiteralPath $iniPath -PathType Leaf) {
+                foreach ($line in Get-Content -LiteralPath $iniPath -ErrorAction SilentlyContinue) {
+                  if ($line -match '^\s*server\.tcp\.port\s*=\s*(\d+)\s*$') {
+                    $portValue = $Matches[1]
+                    break
+                  }
+                }
+              }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($portValue)) {
+              $portValue = '3363'
+            }
+
+            $closeArgs = @(
+              '-LogToConsole', 'TRUE',
+              '-OperationName', 'CloseLabVIEW',
+              '-LabVIEWPath', $labviewPath,
+              '-PortNumber', $portValue
+            )
+
+            Write-Host ("Closing LabVIEW via LabVIEWCLI ({0}-bit, port {1})." -f $Bitness, $portValue)
+            & LabVIEWCLI @closeArgs
+            $closeExitCode = $LASTEXITCODE
+            if ($closeExitCode -ne 0) {
+              Write-Warning ("LabVIEWCLI CloseLabVIEW returned exit code {0} ({1}-bit)." -f $closeExitCode, $Bitness)
+            }
+          }
+
+          function Test-TargetLabVIEWProcessRunning {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$LabVIEWYear,
+              [Parameter(Mandatory = $true)]
+              [ValidateSet('32', '64')]
+              [string]$Bitness
+            )
+
+            $installRoot = if ($Bitness -eq '32') {
+              "C:\Program Files (x86)\National Instruments\LabVIEW $LabVIEWYear"
+            } else {
+              "C:\Program Files\National Instruments\LabVIEW $LabVIEWYear"
+            }
+
+            $processes = Get-CimInstance Win32_Process -Filter "Name='LabVIEW.exe'" -ErrorAction SilentlyContinue
+            if (-not $processes) {
+              return $false
+            }
+
+            foreach ($process in $processes) {
+              if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($installRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+              }
+            }
+
+            return $false
+          }
+
+          try {
+            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+            Start-Sleep -Seconds 2
+            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+            Start-Sleep -Seconds 2
+
+            if (Test-TargetLabVIEWProcessRunning -LabVIEWYear $labviewYear -Bitness '32') {
+              throw "LabVIEW $labviewYear (32-bit) is still running after two LabVIEWCLI close attempts; aborting native x86 PPL build for process isolation."
+            }
+
+            & "$consumerRoot/.github/actions/build-lvlibp/BuildProjectSpec.ps1" `
+              -LabVIEWVersion $labviewYear `
+              -SupportedBitness 32 `
+              -RepoRoot "$consumerRoot" `
+              -Major $env:VERSION_MAJOR `
+              -Minor $env:VERSION_MINOR `
+              -Patch $env:VERSION_PATCH `
+              -Build $env:VERSION_BUILD `
+              -Commit $env:VERSION_COMMIT `
+              -SkipWorktreeRootCheck
+
+            Invoke-LabVIEWCliClose -LabVIEWYear $labviewYear -Bitness '32'
+          } finally {
+            if (Test-Path -LiteralPath $closeScriptBackupPath -PathType Leaf) {
+              Move-Item -LiteralPath $closeScriptBackupPath -Destination $closeScriptPath -Force
+            }
+          }
+
           & "$consumerRoot/.github/actions/rename-file/Rename-file.ps1" `
             -CurrentFilename "$consumerRoot/resource/plugins/lv_icon.lvlibp" `
             -NewFilename "$consumerRoot/resource/plugins/lv_icon_x86.lvlibp"
